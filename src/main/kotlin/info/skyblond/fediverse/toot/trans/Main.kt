@@ -1,4 +1,4 @@
-package info.skyblond.mastodon.toot.trans
+package info.skyblond.fediverse.toot.trans
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 

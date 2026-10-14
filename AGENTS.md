@@ -31,7 +31,8 @@ the original toot.
 
 ## Repo map
 
-Base package: `info.skyblond.mastodon.toot.trans`.
+Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid using Mastodon in code due to copyright issues).
+Base package for Mastodon API: `info.skyblond.fediverse.masto.api`
 
 ## Architecture
 
@@ -75,6 +76,7 @@ following perspectives:
   the cap must refactor it first: split by cohesive responsibility into
   named modules. Grab-bag files (`Utils.kt`, `Helpers.kt`, `Common.kt`)
   are forbidden. They just relocate the problem.
+- Test coverage: all core logic should have test covered for happy path, error path and common edge cases.
 
 ### Kotlin style
 

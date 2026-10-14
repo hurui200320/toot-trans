@@ -40,7 +40,7 @@ tasks.test {
 }
 
 application {
-    mainClass.set("info.skyblond.mastodon.toot.trans.MainKt")
+    mainClass.set("info.skyblond.fediverse.toot.trans.MainKt")
 }
 
 koinCompiler {

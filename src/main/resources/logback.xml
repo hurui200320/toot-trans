@@ -10,6 +10,6 @@
     </root>
 
     <!-- Uncomment to see debug logs for foo.bar.*:
-    <logger name="info.skyblond.mastodon.foo.bar" level="DEBUG"/>
+    <logger name="info.skyblond.fediverse.foo.bar" level="DEBUG"/>
     -->
 </configuration>
