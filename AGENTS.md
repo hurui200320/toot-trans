@@ -13,7 +13,6 @@ Guidance for AI agents (and humans) working in this project.
 - [Architecture](#architecture)
 - [Verification commands](#verification-commands)
 - [Code quality and style rules](#code-quality-and-style-rules)
-- [Backend style](#backend-style)
 - [Operational rule](#operational-rule)
 
 This file is a MAP, not a specification: for any behavioral question the
@@ -32,7 +31,6 @@ the original toot.
 ## Repo map
 
 Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid using Mastodon in code due to copyright issues).
-Base package for Mastodon API: `info.skyblond.fediverse.masto.api`
 
 ## Architecture
 

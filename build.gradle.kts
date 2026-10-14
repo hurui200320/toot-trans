@@ -13,7 +13,7 @@ repositories {
 }
 
 // dependency injection: the container + the compiler plugin DSL
-// (org.koin.plugin.module.dsl.*), see di/AppModule.kt
+// (org.koin.plugin.module.dsl.*)
 val koinVersion = "4.2.2"
 
 dependencies {
