@@ -68,7 +68,6 @@ following perspectives:
 - Performance and security: Inefficiencies, resource leaks, injection risks, insecure defaults, exposed secrets, missing input validation.
 - Code quality and style: follow the existing pattern (project conventions), no dark magic, no hacky solution/workaround, no complex logic without comments. Maintainability is the first priority.
   - Single Source of Truth for Comments: Only explain logic at its original/primary location. Other places referencing this logic MUST use pointers (e.g., `see [Component/File]`) and MUST NOT repeat the same explanation.
-  - Wire Protocol Documentation: see [Backend style](#backend-style).
 - File size budget: all main source code files must stay at or below 800
   lines — test files are excluded. A change that would push a file past
   the cap must refactor it first: split by cohesive responsibility into
