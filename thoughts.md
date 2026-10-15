@@ -157,6 +157,7 @@ Mastodon 的 Status ID 是按时间单调递增的 Snowflake ID，列表接口�
 1. **时间水位线（Cutoff）**：`now - P.created_at <= 24 小时`（防止重启时扫描远古未翻译推文）。
 2. **冷却期已满（Cooldown）**：取 `effectiveTime = P.editedAt ?: P.createdAt`，需满足 `now - effectiveTime >= configuredCooldown`（如 3 分钟；若在冷却期内编辑过推文，倒计时自动顺延）。
 3. **非对外回复**：`P.inReplyToAccountId == null || P.inReplyToAccountId == myAccountId`（只翻译原创主帖和自己的串，不打扰别人评论区）。
+  + 需要构建整条回复串，需要保证每条都是回复自己的。如果1回复别人，2回复了1，这个时候不应该翻译。
 4. **包含中文且非英文帖**：`P.language != "en"` 且正文/CW 包含中文字符（`[\u4e00-\u9fff]`）。
 5. **尚未完成翻译**：
     - 若 `P.id` 下已存在翻译链 `E1..Ek`，且尾节点 `Ek` 的尾标满足 `x == y`（同时 `k == y`），说明**已翻译完成**，直接跳过。
