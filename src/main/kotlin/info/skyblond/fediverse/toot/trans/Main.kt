@@ -47,11 +47,14 @@ fun main() {
             logger.info { "Logged in as ${it.username}, user id: ${it.id}" }
             it.id
         }
-        val fetch1 =         accountsClient.getStatuses(userId, 40)
+        // a boost embeds someone else's toot and carries no text of the
+        // owner's own, so there is nothing to translate; filter them
+        // out server-side instead of skipping the wrappers downstream
+        val fetch1 = accountsClient.getStatuses(userId, 40, excludeReblogs = true)
         fetch1.forEach {
             logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
         }
-        accountsClient.getStatuses(userId, 40, maxId = fetch1.last().id).forEach {
+        accountsClient.getStatuses(userId, 40, maxId = fetch1.last().id, excludeReblogs = true).forEach {
             logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
         }
     }

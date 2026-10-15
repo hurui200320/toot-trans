@@ -12,6 +12,10 @@ interface AccountsClient {
     /**
      * GET /api/v1/accounts/:accountId/statuses HTTP/1.1
      * https://docs.joinmastodon.org/methods/accounts/#statuses
+     *
+     * [excludeReblogs] maps to the `exclude_reblogs` query parameter;
+     * it defaults to the server's default (false) to keep this
+     * client general-purpose — callers decide the filtering policy.
      * */
     suspend fun getStatuses(
         accountId: String,
@@ -19,5 +23,6 @@ interface AccountsClient {
         sinceId: String? = null,
         minId: String? = null,
         maxId: String? = null,
+        excludeReblogs: Boolean = false,
     ): List<Status>
 }

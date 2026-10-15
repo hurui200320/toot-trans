@@ -294,6 +294,34 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
     }
 
     @Test
+    fun `getStatuses sends exclude_reblogs when requested`() {
+        // the caller owns the filtering policy: e.g. toot-trans skips
+        // boosts because they carry no own text to translate
+        enqueueJson(200, "[]")
+
+        runBlocking {
+            client.getStatuses("14715", limit = 20, maxId = "200", excludeReblogs = true)
+        }
+
+        val recorded = server.takeRequest()
+        assertEquals(
+            "/api/v1/accounts/14715/statuses?limit=20&max_id=200&exclude_reblogs=true",
+            recorded.target
+        )
+    }
+
+    @Test
+    fun `getStatuses omits exclude_reblogs by default`() {
+        // the client mirrors the server default, staying general-purpose
+        enqueueJson(200, "[]")
+
+        runBlocking { client.getStatuses("14715", limit = 20, excludeReblogs = false) }
+
+        val recorded = server.takeRequest()
+        assertEquals("/api/v1/accounts/14715/statuses?limit=20", recorded.target)
+    }
+
+    @Test
     fun `getStatuses surfaces the server error on 404`() {
         enqueueJson(404, """{"error": "Record not found"}""")
 

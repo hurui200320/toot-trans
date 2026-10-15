@@ -24,6 +24,7 @@ class OkHttpAccountsClient(
         sinceId: String?,
         minId: String?,
         maxId: String?,
+        excludeReblogs: Boolean,
     ): List<Status> {
         require(accountId.isNotBlank()) { "accountId must not be blank" }
         // https://docs.joinmastodon.org/methods/accounts/#statuses
@@ -37,6 +38,8 @@ class OkHttpAccountsClient(
             sinceId?.let { put("since_id", it) }
             minId?.let { put("min_id", it) }
             maxId?.let { put("max_id", it) }
+            // only non-default values go on the wire, like the cursors above
+            if (excludeReblogs) put("exclude_reblogs", "true")
         }
         return api.get(
             path = listOf("api", "v1", "accounts", accountId, "statuses"),
