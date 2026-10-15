@@ -4,7 +4,9 @@ import info.skyblond.fediverse.toot.trans.config.ConfigProvider
 import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
+import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
@@ -14,6 +16,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
 import org.junit.jupiter.api.io.TempDir
 import org.koin.core.KoinApplication
 import org.koin.core.error.InstanceCreationException
@@ -96,8 +100,83 @@ class AppModuleTest {
 
             // The container owns the worker and waits for it during teardown.
             app.koin.get<StatusesPool>()
+
+            // CredentialAccount is left out here: its resolution performs
+            // network IO, so it gets the dedicated MockWebServer-backed
+            // tests below instead of the fake host above
         } finally {
             app.close()
+        }
+    }
+
+    /**
+     * A local twin of MastoApiTestBase's enqueueJson, kept private so
+     * this DI test stands alone instead of inheriting the API client
+     * scaffolding it does not otherwise need.
+     * */
+    private fun MockWebServer.enqueueJson(code: Int, body: String) {
+        enqueue(
+            MockResponse.Builder()
+                .code(code)
+                .body(body)
+                .setHeader("Content-Type", "application/json; charset=utf-8")
+                .build()
+        )
+    }
+
+    /**
+     * [CredentialAccount] is the one graph node that does network IO
+     * at resolution: the stand-in instance answers the call, and the
+     * request count pins the single semantics — fetched exactly once,
+     * then served from the cache.
+     * */
+    @Test
+    fun `resolves the credential account from the instance once`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueueJson(200, """{"id": "14715", "username": "trwnh"}""")
+            val app = appWith(configWith(mastoHost = server.url("/").toString(), accessToken = testToken))
+            try {
+                val account = app.koin.get<CredentialAccount>()
+                assertEquals("14715", account.id)
+                assertEquals("trwnh", account.username)
+
+                // the second resolution serves the cached single
+                // instead of calling the instance again
+                assertEquals(account, app.koin.get<CredentialAccount>())
+                assertEquals(1, server.requestCount)
+            } finally {
+                app.close()
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    /**
+     * A rejected token fails the resolution itself (fail-fast at the
+     * container), with the server's error as the root cause under
+     * Koin's wrapping.
+     * */
+    @Test
+    fun `rejected credentials fail account resolution`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueueJson(401, """{"error": "The access token is invalid"}""")
+            val app = appWith(configWith(mastoHost = server.url("/").toString(), accessToken = testToken))
+            try {
+                val error = assertIs<MastoApiException>(
+                    assertFailsFast { app.koin.get<CredentialAccount>() }
+                )
+                assertEquals(401, error.httpCode)
+                assertEquals("The access token is invalid", error.detail)
+            } finally {
+                app.close()
+            }
+        } finally {
+            server.close()
         }
     }
 

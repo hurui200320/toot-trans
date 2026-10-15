@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans
 import info.skyblond.fediverse.toot.trans.di.appConfigStore
 import info.skyblond.fediverse.toot.trans.di.appModule
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
@@ -17,13 +18,11 @@ fun main() {
     val koin = startKoin { modules(appModule(config)) }.koin
     Runtime.getRuntime().addShutdownHook(Thread { stopKoin() })
 
+    val accountsClient = koin.get<AccountsClient>()
+    val statusesPool = koin.get<StatusesPool>()
+    val userId = koin.get<CredentialAccount>().id
+
     runBlocking {
-        val accountsClient = koin.get<AccountsClient>()
-        val statusesPool = koin.get<StatusesPool>()
-        val userId = accountsClient.verifyCredentials().let {
-            logger.info { "Logged in as ${it.username}, user id: ${it.id}" }
-            it.id
-        }
         // a boost embeds someone else's toot and carries no text of the
         // owner's own, so there is nothing to translate; filter them
         // out server-side instead of skipping the wrappers downstream

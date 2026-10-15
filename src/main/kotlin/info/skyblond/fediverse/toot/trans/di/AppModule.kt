@@ -6,6 +6,7 @@ import info.skyblond.fediverse.toot.trans.config.EnvConfigProvider
 import info.skyblond.fediverse.toot.trans.config.file.PropertiesConfigProvider
 import info.skyblond.fediverse.toot.trans.masto.MastoApiClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
@@ -15,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.onClose
@@ -32,6 +34,11 @@ private val logger = KotlinLogging.logger("DI")
  * pulling container dependencies with `get()` and plain values from
  * [config], so a missing or invalid value fails the resolution of the
  * dependents (fail-fast) instead of producing a half-configured object.
+ *
+ * The one exception is [CredentialAccount]: it is fetched from the
+ * instance at first resolution, so a rejected access token fails the
+ * resolution itself, not just the first API consumer — see that
+ * definition for the blocking resolution contract.
  * */
 fun appModule(config: ConfigStore): Module = module {
     // one client shared by every API component, so its connection pool
@@ -72,6 +79,22 @@ fun appModule(config: ConfigStore): Module = module {
             maxWaitDuration = config.poolMaxWaitDuration,
         )
     } withOptions { onClose { it?.close() } }
+
+    // fetched from the instance with a blocking verify_credentials call
+    // at first resolution: only resolve this bean from a thread that may
+    // block on network IO — the main thread during startup, see Main.kt —
+    // never from a coroutine on a shared dispatcher (e.g. the pool
+    // worker's), which it would stall
+    single<CredentialAccount> {
+        val accountsClient = get<AccountsClient>()
+        runBlocking(Dispatchers.IO) {
+            accountsClient.verifyCredentials()
+        }.also {
+            info.skyblond.fediverse.toot.trans.di.logger.info {
+                "Logged in as ${it.username}, user id: ${it.id}"
+            }
+        }
+    }
 }
 
 /**
