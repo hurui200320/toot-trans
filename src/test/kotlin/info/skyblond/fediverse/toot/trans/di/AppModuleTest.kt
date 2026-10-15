@@ -11,6 +11,7 @@ import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
@@ -93,11 +94,8 @@ class AppModuleTest {
             assertIs<OkHttpAccountsClient>(app.koin.get<AccountsClient>())
             assertIs<OkHttpStatusesClient>(app.koin.get<StatusesClient>())
 
-            // constructing the pool launches its worker; shut it down so
-            // the test does not leak it on the application scope
-            runBlocking {
-                app.koin.get<StatusesPool>().shutdown()
-            }
+            // The container owns the worker and waits for it during teardown.
+            app.koin.get<StatusesPool>()
         } finally {
             app.close()
         }
@@ -117,6 +115,7 @@ class AppModuleTest {
             val pool = app.koin.get<StatusesPool>()
             app.close()
             assertFalse(scope.isActive)
+            assertTrue(scope.coroutineContext[Job]!!.children.none(), "Container close must join the pool worker")
             // a closed pool rejects further lookups: getStatus fails on
             // the cancelled worker instead of queueing the request
             val error = assertFails { runBlocking { pool.getStatus("1") } }

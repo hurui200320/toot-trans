@@ -12,6 +12,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -48,8 +49,8 @@ import kotlin.time.TimeSource
  * of other errors.
  * Cache hits and [seed] remain available during backoff.
  *
- * The worker belongs to [scope]. Call [close] or [shutdown] before waiting
- * for that scope to finish. Individual callers cannot cancel shared work;
+ * The worker belongs to [scope]. Call [close] before waiting for that
+ * scope to finish. Individual callers cannot cancel shared work;
  * queued work remains useful for caching even if all its callers cancel.
  * Distinct outstanding IDs remain in an unbounded FIFO queue.
  * Timing uses [timeSource] for elapsed durations and [clock] for server
@@ -102,6 +103,16 @@ class StatusesPool(
         requireValidDuration("maxWaitDuration", maxWaitDuration)
         require(resetMargin.isFinite() && resetMargin >= Duration.ZERO) { "resetMargin must be finite and non-negative" }
         require(maxCacheEntries > 0) { "maxCacheEntries must be positive" }
+
+        logger.info {
+            "StatusesPool initialized with " +
+                    "batchWindow=$batchWindow, " +
+                    "cacheTtl=$cacheTtl, " +
+                    "fallbackDelay=$fallbackDelay, " +
+                    "maxWaitDuration=$maxWaitDuration, " +
+                    "resetMargin=$resetMargin, " +
+                    "maxCacheEntries=$maxCacheEntries"
+        }
     }
 
     // Enter try/finally before exposing the pool so immediate cancellation cannot skip cleanup.
@@ -179,13 +190,19 @@ class StatusesPool(
         }
     }
 
+    /**
+     * Cancel the worker and block until its cleanup has released all outstanding
+     * lookups. This does not drain requests or cancel the supplied scope.
+     * Repeated and concurrent calls are safe.
+     *
+     * Called by Koin during application teardown. The worker's dispatcher must
+     * remain able to progress while the calling thread is blocked; do not call
+     * this from the worker itself or from its sole dispatcher thread.
+     */
     override fun close() {
-        worker.cancel()
-    }
-
-    /** Cancel the pool and wait for all outstanding lookups to be released. */
-    suspend fun shutdown() {
-        worker.cancelAndJoin()
+        runBlocking {
+            worker.cancelAndJoin()
+        }
     }
 
     private fun putCached(id: String, status: Status) {

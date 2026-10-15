@@ -5,13 +5,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.time.Clock
 import java.time.Instant
@@ -286,7 +290,7 @@ class StatusesPoolTest {
             runCurrent()
             assertEquals(status("1"), result.await())
             assertEquals(listOf(1_000L, 3_000L, 5_000L, 7_000L, 9_000L), f.client.calls.map { it.at - start })
-            pool.shutdown()
+            withContext(Dispatchers.IO) { pool.close() }
         }
     }
 
@@ -370,7 +374,7 @@ class StatusesPoolTest {
             runCurrent()
             assertEquals(status("1"), retry.await())
             assertEquals(2, f.client.calls.size)
-            pool.shutdown()
+            withContext(Dispatchers.IO) { pool.close() }
         }
     }
 
@@ -443,7 +447,7 @@ class StatusesPoolTest {
     }
 
     @Test
-    fun `shutdown releases queued in flight and rate limited callers and rejects new work`() = runTest {
+    fun `close releases queued in flight and rate limited callers and rejects new work`() = runTest {
         for (mode in listOf("queued", "inFlight", "limited")) {
             val f = Fixture(this)
             f.client.fetch = {
@@ -459,35 +463,22 @@ class StatusesPoolTest {
                 advanceTimeBy(1_000)
                 runCurrent()
             }
-            pool.shutdown()
+            withContext(Dispatchers.IO) { pool.close() }
             assertFailsWith<CancellationException> { result.await() }
             assertFailsWith<CancellationException> { pool.getStatus("2") }
             assertFailsWith<CancellationException> { pool.seed(listOf(status("2"))) }
+            assertFailsWith<CancellationException> { pool.invalidate("2") }
         }
     }
 
     @Test
-    fun `immediate shutdown releases callers before worker dispatcher runs`() = runTest {
+    fun `immediate close releases queued lookups before returning`() = runTest {
         val f = Fixture(this)
-        val pool = f.pool()
-        val result = async(start = CoroutineStart.UNDISPATCHED) { pool.getStatus("1") }
-        try {
-            assertFalse(result.isCompleted)
-            pool.shutdown()
-            runCurrent()
-            assertTrue(result.isCompleted, "Shutdown must release the queued caller")
-            assertFailsWith<CancellationException> { result.await() }
-            assertFailsWith<CancellationException> { pool.getStatus("2") }
-            assertTrue(f.client.calls.isEmpty())
-        } finally {
-            result.cancel()
-        }
-    }
-
-    @Test
-    fun `immediate close releases callers before worker dispatcher runs`() = runTest {
-        val f = Fixture(this)
-        val pool = f.pool()
+        val parent = Job()
+        val pool = StatusesPool(
+            f.client, CoroutineScope(parent + Dispatchers.Default),
+            clock = f.clock, timeSource = testScheduler.timeSource,
+        )
         val result = async(start = CoroutineStart.UNDISPATCHED) { pool.getStatus("1") }
         try {
             assertFalse(result.isCompleted)
@@ -498,7 +489,55 @@ class StatusesPoolTest {
             assertFailsWith<CancellationException> { pool.getStatus("2") }
             assertTrue(f.client.calls.isEmpty())
         } finally {
+            pool.close()
             result.cancel()
+            parent.cancel()
+        }
+    }
+
+    @Test
+    fun `close waits for in flight cleanup and leaves the supplied scope active`() = runTest {
+        val f = Fixture(this)
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val finishCleanup = CompletableDeferred<Unit>()
+        var cleanedUp = false
+        f.client.fetch = {
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    cleanupStarted.complete(Unit)
+                    finishCleanup.await()
+                    cleanedUp = true
+                }
+            }
+        }
+        val parent = Job(backgroundScope.coroutineContext[Job])
+        val scope = CoroutineScope(backgroundScope.coroutineContext + parent)
+        val pool = StatusesPool(f.client, scope, clock = f.clock, timeSource = testScheduler.timeSource)
+        val result = async { pool.getStatus("1") }
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        // Blocking close must run off the test scheduler's thread so cleanup can progress.
+        val closing = async(Dispatchers.IO) { pool.close() }
+        try {
+            cleanupStarted.await()
+            assertFalse(closing.isCompleted)
+            assertFalse(cleanedUp)
+            finishCleanup.complete(Unit)
+            closing.await()
+            assertTrue(cleanedUp)
+            assertTrue(parent.isActive)
+            assertFailsWith<CancellationException> { result.await() }
+            assertFailsWith<CancellationException> { pool.getStatus("2") }
+            withContext(Dispatchers.IO) { pool.close() }
+            assertTrue(parent.isActive)
+        } finally {
+            finishCleanup.complete(Unit)
+            closing.await()
+            result.cancel()
+            parent.cancel()
         }
     }
 

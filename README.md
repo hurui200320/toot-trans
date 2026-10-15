@@ -83,9 +83,13 @@ try {
     // After successfully deleting a status:
     pool.invalidate(deletedId)
 } finally {
-    pool.shutdown()
+    pool.close()
 }
 ```
+
+In the application, Koin owns the pool and calls `close()` during teardown,
+on normal exit or JVM shutdown (including Docker's SIGTERM). Closing cancels
+pending lookups and waits for worker cleanup; it does not drain requests.
 
 Lookups return `null` for statuses unavailable to the current token.
 Cache bypass still obeys the pool's batching and rate-limit handling.

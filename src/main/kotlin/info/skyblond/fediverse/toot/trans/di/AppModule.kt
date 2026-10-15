@@ -10,6 +10,7 @@ import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +21,8 @@ import org.koin.core.module.dsl.onClose
 import org.koin.core.module.dsl.withOptions
 import org.koin.dsl.module
 import java.io.File
+
+private val logger = KotlinLogging.logger("DI")
 
 /**
  * The Koin container's module: the whole application object graph.
@@ -55,10 +58,8 @@ fun appModule(config: ConfigStore): Module = module {
 
     // the pool* settings and their semantics are documented on
     // [StatusesPool]; like the scope above, the pool is closed by its
-    // onClose callback when the container stops. The callback cannot
-    // suspend, so it calls `close` (fire-and-forget cancel) rather than
-    // `shutdown` (which waits for the worker): accepted because no
-    // lookups are outstanding when the container stops.
+    // onClose callback when the container stops; see [StatusesPool.close]
+    // for the blocking teardown contract.
     single<StatusesPool> {
         StatusesPool(
             client = get(),
@@ -92,4 +93,7 @@ fun appConfigStore(
         PropertiesConfigProvider(File(propertiesPath)),
         DefaultConfigProvider(),
     )
-)
+).also { config ->
+    // logging also serves as sanity check
+    config.mastoHost.let { logger.info { "Configured server host: $it" } }
+}
