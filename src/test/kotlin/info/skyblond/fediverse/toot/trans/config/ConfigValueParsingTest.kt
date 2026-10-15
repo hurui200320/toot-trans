@@ -16,7 +16,7 @@ class ConfigValueParsingTest {
         assertEquals(500.milliseconds, parseDurationConfig("poolResetMargin", "500ms"))
         assertEquals(1.seconds, parseDurationConfig("poolBatchWindow", "1s"))
         assertEquals(2.minutes, parseDurationConfig("poolCacheTtl", "2m"))
-        assertEquals(24.hours, parseDurationConfig("poolMaxRetry", "24h"))
+        assertEquals(24.hours, parseDurationConfig("poolMaxWaitDuration", "24h"))
     }
 
     @Test

@@ -28,9 +28,6 @@ class ConfigStore(
     override val poolBatchWindow: Duration
         get() = getOrThrow("pool batch window") { it.poolBatchWindow }
 
-    override val poolRequestInterval: Duration
-        get() = getOrThrow("pool request interval") { it.poolRequestInterval }
-
     override val poolCacheTtl: Duration
         get() = getOrThrow("pool cache TTL") { it.poolCacheTtl }
 
@@ -43,8 +40,8 @@ class ConfigStore(
     override val poolFallbackDelay: Duration
         get() = getOrThrow("pool fallback delay") { it.poolFallbackDelay }
 
-    override val poolMaxRetry: Duration
-        get() = getOrThrow("pool max retry") { it.poolMaxRetry }
+    override val poolMaxWaitDuration: Duration
+        get() = getOrThrow("pool max wait duration") { it.poolMaxWaitDuration }
 
     private fun <T> getOrThrow(
         name: String,

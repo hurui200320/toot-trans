@@ -29,22 +29,20 @@ class EnvConfigProviderTest {
         val provider = EnvConfigProvider(
             mapOf(
                 "POOL_BATCH_WINDOW" to "500ms",
-                "POOL_REQUEST_INTERVAL" to "2s",
                 "POOL_CACHE_TTL" to "5m",
                 "POOL_MAX_CACHE_ENTRIES" to "200",
                 "POOL_RESET_MARGIN" to "1s",
                 "POOL_FALLBACK_DELAY" to "PT1M30S",
-                "POOL_MAX_RETRY" to "2h",
+                "POOL_MAX_WAIT_DURATION" to "2h",
             )::get
         )
 
         assertEquals(500.milliseconds, provider.poolBatchWindow)
-        assertEquals(2.seconds, provider.poolRequestInterval)
         assertEquals(5.minutes, provider.poolCacheTtl)
         assertEquals(200, provider.poolMaxCacheEntries)
         assertEquals(1.seconds, provider.poolResetMargin)
         assertEquals(90.seconds, provider.poolFallbackDelay)
-        assertEquals(2.hours, provider.poolMaxRetry)
+        assertEquals(2.hours, provider.poolMaxWaitDuration)
     }
 
     @Test

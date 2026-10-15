@@ -84,24 +84,22 @@ class PropertiesConfigProviderTest {
         file.writeText(
             """
             poolBatchWindow=500ms
-            poolRequestInterval=2s
             poolCacheTtl=5m
             poolMaxCacheEntries=200
             poolResetMargin=1s
             poolFallbackDelay=30s
-            poolMaxRetry=2h
+            poolMaxWaitDuration=2h
             """.trimIndent()
         )
 
         val provider = PropertiesConfigProvider(file)
 
         assertEquals(500.milliseconds, provider.poolBatchWindow)
-        assertEquals(2.seconds, provider.poolRequestInterval)
         assertEquals(5.minutes, provider.poolCacheTtl)
         assertEquals(200, provider.poolMaxCacheEntries)
         assertEquals(1.seconds, provider.poolResetMargin)
         assertEquals(30.seconds, provider.poolFallbackDelay)
-        assertEquals(2.hours, provider.poolMaxRetry)
+        assertEquals(2.hours, provider.poolMaxWaitDuration)
     }
 
     @Test

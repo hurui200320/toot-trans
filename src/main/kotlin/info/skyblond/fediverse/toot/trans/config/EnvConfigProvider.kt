@@ -20,9 +20,6 @@ class EnvConfigProvider(
     override val poolBatchWindow: Duration?
         get() = duration("POOL_BATCH_WINDOW")
 
-    override val poolRequestInterval: Duration?
-        get() = duration("POOL_REQUEST_INTERVAL")
-
     override val poolCacheTtl: Duration?
         get() = duration("POOL_CACHE_TTL")
 
@@ -35,8 +32,8 @@ class EnvConfigProvider(
     override val poolFallbackDelay: Duration?
         get() = duration("POOL_FALLBACK_DELAY")
 
-    override val poolMaxRetry: Duration?
-        get() = duration("POOL_MAX_RETRY")
+    override val poolMaxWaitDuration: Duration?
+        get() = duration("POOL_MAX_WAIT_DURATION")
 
     private fun duration(name: String): Duration? =
         parseDurationConfig(name, env(name))

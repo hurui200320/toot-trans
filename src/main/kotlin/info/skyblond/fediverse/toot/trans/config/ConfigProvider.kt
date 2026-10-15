@@ -26,11 +26,6 @@ interface ConfigProvider {
     val poolBatchWindow: Duration?
 
     /**
-     * Minimum spacing between [StatusesPool] request starts, see its KDoc.
-     * */
-    val poolRequestInterval: Duration?
-
-    /**
      * Insertion-based expiry of the [StatusesPool] cache, see its KDoc.
      * */
     val poolCacheTtl: Duration?
@@ -53,5 +48,5 @@ interface ConfigProvider {
     /**
      * Sanity bound on [StatusesPool] reset-based backoff, see its KDoc.
      * */
-    val poolMaxRetry: Duration?
+    val poolMaxWaitDuration: Duration?
 }

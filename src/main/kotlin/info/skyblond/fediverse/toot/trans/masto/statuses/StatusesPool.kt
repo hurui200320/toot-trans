@@ -31,16 +31,19 @@ import kotlin.time.TimeSource
  *
  * Misses collect for [batchWindow] from the oldest queued request (not a
  * debounce). One worker calls [StatusesClient.getStatuses], at most
- * [StatusesClient.MAX_IDS_PER_CALL] IDs at a time, with request starts at
- * least [requestInterval] apart. Overflow stays FIFO queued; idle periods
- * do not cause catch-up bursts. This pacing does not reserve budget for
- * other API clients, which share the server's rate-limit buckets.
+ * [StatusesClient.MAX_IDS_PER_CALL] IDs at a time. Ready batches are sent
+ * back-to-back, with overflow staying FIFO queued; request starts are not
+ * paced, because the instance's rate-limit windows are fixed, so spacing
+ * requests saves no budget. Exhausting the shared buckets surfaces as 429
+ * backoff (see below), which adapts to whatever limits the instance
+ * actually enforces. The pool does not reserve budget for other API
+ * clients, which share the server's rate-limit buckets.
  *
  * The size-bounded LRU cache expires after insertion, never after access.
  * Omitted IDs resolve to null without caching; callers should avoid repeatedly
  * requesting missing statuses. Other errors fail that batch's callers.
  * 429s suspend the worker until the reset plus [resetMargin]; resets that are
- * missing, unparseable, or further out than [maxRetry] count as unusable
+ * missing, unparseable, or further out than [maxWaitDuration] count as unusable
  * headers and use a fixed [fallbackDelay] instead, with no automatic retry
  * of other errors.
  * Cache hits and [seed] remain available during backoff.
@@ -56,12 +59,11 @@ class StatusesPool(
     private val client: StatusesClient,
     scope: CoroutineScope,
     private val batchWindow: Duration = DEFAULT_BATCH_WINDOW,
-    private val requestInterval: Duration = DEFAULT_REQUEST_INTERVAL,
     private val cacheTtl: Duration = DEFAULT_CACHE_TTL,
     private val maxCacheEntries: Int = DEFAULT_MAX_CACHE_ENTRIES,
     private val resetMargin: Duration = DEFAULT_RESET_MARGIN,
     private val fallbackDelay: Duration = DEFAULT_FALLBACK_DELAY,
-    private val maxRetry: Duration = DEFAULT_MAX_RETRY,
+    private val maxWaitDuration: Duration = DEFAULT_MAX_WAIT_DURATION,
     private val clock: Clock = Clock.systemUTC(),
     private val timeSource: TimeSource = TimeSource.Monotonic,
 ) : AutoCloseable {
@@ -95,10 +97,9 @@ class StatusesPool(
 
     init {
         requireValidDuration("batchWindow", batchWindow)
-        requireValidDuration("requestInterval", requestInterval)
         requireValidDuration("cacheTtl", cacheTtl)
         requireValidDuration("fallbackDelay", fallbackDelay)
-        requireValidDuration("maxRetry", maxRetry)
+        requireValidDuration("maxWaitDuration", maxWaitDuration)
         require(resetMargin.isFinite() && resetMargin >= Duration.ZERO) { "resetMargin must be finite and non-negative" }
         require(maxCacheEntries > 0) { "maxCacheEntries must be positive" }
     }
@@ -195,7 +196,6 @@ class StatusesPool(
     }
 
     private suspend fun runWorker() {
-        var lastStarted: TimeMark? = null
         while (true) {
             val oldest = mutex.withLock { pending.values.firstOrNull { !it.inFlight } }
             if (oldest == null) {
@@ -203,8 +203,7 @@ class StatusesPool(
                 continue
             }
             val collectionWait = batchWindow - oldest.queuedAt.elapsedNow()
-            val pacingWait = lastStarted?.let { requestInterval - it.elapsedNow() } ?: Duration.ZERO
-            delay(maxOf(collectionWait, pacingWait, Duration.ZERO))
+            delay(maxOf(collectionWait, Duration.ZERO))
             val batch = mutex.withLock {
                 pending.entries.filter { !it.value.inFlight }
                     .take(StatusesClient.MAX_IDS_PER_CALL)
@@ -217,8 +216,6 @@ class StatusesPool(
                 val active =
                     mutex.withLock { batch.filter { (id, lookup) -> pending[id] === lookup } }
                 if (active.isEmpty()) break
-                lastStarted?.let { delay(maxOf(requestInterval - it.elapsedNow(), Duration.ZERO)) }
-                lastStarted = timeSource.markNow()
                 try {
                     val statuses = client.getStatuses(active.keys).associateBy { it.id }
                     mutex.withLock {
@@ -266,10 +263,10 @@ class StatusesPool(
         if (!reset.isAfter(now)) return null
         val wait = java.time.Duration.between(now, reset)
         // Windows can legitimately be long on customized instances, so
-        // distance alone does not flag a broken header; [maxRetry] is the
+        // distance alone does not flag a broken header; [maxWaitDuration] is the
         // sanity line. Beyond it the header is treated as unusable so a
         // pathological timestamp cannot park the worker indefinitely.
-        if (wait > java.time.Duration.ofMillis(maxRetry.inWholeMilliseconds)) return null
+        if (wait > java.time.Duration.ofMillis(maxWaitDuration.inWholeMilliseconds)) return null
         return wait.seconds.seconds + (wait.nano / 1_000_000).milliseconds + resetMargin
     }
 
@@ -290,7 +287,6 @@ class StatusesPool(
          * the programmatic/test defaults.
          * */
         val DEFAULT_BATCH_WINDOW: Duration = 1.seconds
-        val DEFAULT_REQUEST_INTERVAL: Duration = 1.seconds
         val DEFAULT_CACHE_TTL: Duration = 1.minutes
         val DEFAULT_MAX_CACHE_ENTRIES: Int = 1_000
 
@@ -299,6 +295,6 @@ class StatusesPool(
         val DEFAULT_FALLBACK_DELAY: Duration = 10.seconds
 
         /** Sanity bound on reset-based backoff, see `resetWait`. */
-        val DEFAULT_MAX_RETRY: Duration = 24.hours
+        val DEFAULT_MAX_WAIT_DURATION: Duration = 24.hours
     }
 }

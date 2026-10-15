@@ -44,12 +44,11 @@ If a required setting is not provided by any source, the app fails to start with
 | Instance host | `MASTO_HOST` | `mastoHost` | Yes | `https://mastodon.social/` |
 | Access token | `ACCESS_TOKEN` | `accessToken` | Yes | the token you created above |
 | Pool batch window | `POOL_BATCH_WINDOW` | `poolBatchWindow` | No, default `1s` | `500ms` |
-| Pool request interval | `POOL_REQUEST_INTERVAL` | `poolRequestInterval` | No, default `1s` | `2s` |
 | Pool cache TTL | `POOL_CACHE_TTL` | `poolCacheTtl` | No, default `1m` | `5m` |
 | Pool max cache entries | `POOL_MAX_CACHE_ENTRIES` | `poolMaxCacheEntries` | No, default `1000` | `500` |
 | Pool reset margin | `POOL_RESET_MARGIN` | `poolResetMargin` | No, default `800ms` | `1s` |
 | Pool fallback delay | `POOL_FALLBACK_DELAY` | `poolFallbackDelay` | No, default `10s` | `30s` |
-| Pool max retry | `POOL_MAX_RETRY` | `poolMaxRetry` | No, default `24h` | `1h` |
+| Pool max wait duration | `POOL_MAX_WAIT_DURATION` | `poolMaxWaitDuration` | No, default `24h` | `1h` |
 
 The `pool*` settings tune `StatusesPool`; their semantics (batching, caching,
 429 backoff) are documented in its KDoc in

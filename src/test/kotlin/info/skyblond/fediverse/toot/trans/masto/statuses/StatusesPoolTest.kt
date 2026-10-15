@@ -90,18 +90,19 @@ class StatusesPoolTest {
     }
 
     @Test
-    fun `overflow batches are FIFO and paced without an early full batch flush`() = runTest {
+    fun `overflow batches are FIFO and fire back to back once collected`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
         val results = (1..45).map { async { pool.getStatus(it.toString()) } }
         runCurrent()
+        // nothing fires before the batch window elapses
         assertTrue(f.client.calls.isEmpty())
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals((1..20).map { it.toString() }.toSet(), f.client.calls.single().ids)
-        advanceTimeBy(2_000)
-        runCurrent()
-        assertEquals(listOf(1_000L, 2_000L, 3_000L), f.client.calls.map { it.at })
+        // overflow past MAX_IDS_PER_CALL no longer waits between batches
+        assertEquals(3, f.client.calls.size)
+        assertEquals((1..45).map { it.toString() }, f.client.calls.flatMap { it.ids })
+        assertEquals(List(3) { 1_000L }, f.client.calls.map { it.at })
         assertEquals(listOf(20, 20, 5), f.client.calls.map { it.ids.size })
         assertEquals((1..45).map { status(it.toString()) }, results.map { it.await() })
     }
@@ -259,11 +260,11 @@ class StatusesPoolTest {
         runCurrent()
         assertEquals(status("1"), first.await())
         assertEquals(10_800L, f.client.calls[1].at)
-        advanceTimeBy(1_000)
         runCurrent()
         assertEquals(status("cached"), forced.await())
         assertEquals(status("2"), second.await())
-        assertEquals(11_800L, f.client.calls[2].at)
+        // queued misses fire immediately after the backoff retry, no pacing
+        assertEquals(10_800L, f.client.calls[2].at)
     }
 
     @Test
@@ -307,7 +308,7 @@ class StatusesPoolTest {
     }
 
     @Test
-    fun `customized long reset windows within maxRetry are honored`() = runTest {
+    fun `customized long reset windows within maxWaitDuration are honored`() = runTest {
         val f = Fixture(this)
         f.client.fetch = { ids ->
             if (f.client.calls.size == 1) throw MastoApiException(429, "limited", "2026-10-15T01:00:00Z")
@@ -324,7 +325,7 @@ class StatusesPoolTest {
     }
 
     @Test
-    fun `reset windows beyond maxRetry use the fallback delay`() = runTest {
+    fun `reset windows beyond maxWaitDuration use the fallback delay`() = runTest {
         val f = Fixture(this)
         f.client.fetch = { ids ->
             if (f.client.calls.size == 1) throw MastoApiException(429, "limited", "2026-10-15T00:25:00Z")
@@ -333,7 +334,7 @@ class StatusesPoolTest {
         val pool = StatusesPool(
             f.client, backgroundScope,
             fallbackDelay = 2.seconds,
-            maxRetry = 5.minutes,
+            maxWaitDuration = 5.minutes,
             clock = f.clock,
             timeSource = testScheduler.timeSource,
         )
@@ -511,12 +512,13 @@ class StatusesPoolTest {
         runCurrent()
         assertEquals(status("cached"), pool.getStatus("cached"))
         assertTrue(f.client.calls.isEmpty())
-        advanceTimeBy(51_000)
+        advanceTimeBy(1_000)
         runCurrent()
         assertEquals((1..1_005).map { status(it.toString()) }, results.map { it.await() })
         assertEquals(results.first().await(), duplicate.await())
         assertEquals((1..1_005).map { it.toString() }, f.client.calls.flatMap { it.ids })
-        assertEquals((1..51).map { it * 1_000L }, f.client.calls.map { it.at })
+        // all 51 batches fire as soon as the batch window elapses
+        assertEquals(List(51) { 1_000L }, f.client.calls.map { it.at })
         assertTrue(f.client.calls.all { it.ids.size <= StatusesClient.MAX_IDS_PER_CALL })
     }
 
@@ -531,10 +533,6 @@ class StatusesPoolTest {
             StatusesPool(f.client, backgroundScope, batchWindow = 0.milliseconds)
         }
         assertTrue(batchWindow.message!!.contains("batchWindow"))
-        val requestInterval = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, requestInterval = 0.milliseconds)
-        }
-        assertTrue(requestInterval.message!!.contains("requestInterval"))
         val cacheTtl = assertFailsWith<IllegalArgumentException> {
             StatusesPool(f.client, backgroundScope, cacheTtl = 0.milliseconds)
         }
@@ -547,10 +545,10 @@ class StatusesPoolTest {
             StatusesPool(f.client, backgroundScope, fallbackDelay = 0.milliseconds)
         }
         assertTrue(fallbackDelay.message!!.contains("fallbackDelay"))
-        val maxRetry = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, maxRetry = 0.seconds)
+        val maxWaitDuration = assertFailsWith<IllegalArgumentException> {
+            StatusesPool(f.client, backgroundScope, maxWaitDuration = 0.seconds)
         }
-        assertTrue(maxRetry.message!!.contains("maxRetry"))
+        assertTrue(maxWaitDuration.message!!.contains("maxWaitDuration"))
         val maxCacheEntries = assertFailsWith<IllegalArgumentException> {
             StatusesPool(f.client, backgroundScope, maxCacheEntries = 0)
         }

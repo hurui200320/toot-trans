@@ -14,22 +14,20 @@ class ConfigStoreTest {
         mastoHost: String? = null,
         accessToken: String? = null,
         poolBatchWindow: Duration? = null,
-        poolRequestInterval: Duration? = null,
         poolCacheTtl: Duration? = null,
         poolMaxCacheEntries: Int? = null,
         poolResetMargin: Duration? = null,
         poolFallbackDelay: Duration? = null,
-        poolMaxRetry: Duration? = null,
+        poolMaxWaitDuration: Duration? = null,
     ): ConfigProvider = object : ConfigProvider {
         override val mastoHost: String? = mastoHost
         override val accessToken: String? = accessToken
         override val poolBatchWindow: Duration? = poolBatchWindow
-        override val poolRequestInterval: Duration? = poolRequestInterval
         override val poolCacheTtl: Duration? = poolCacheTtl
         override val poolMaxCacheEntries: Int? = poolMaxCacheEntries
         override val poolResetMargin: Duration? = poolResetMargin
         override val poolFallbackDelay: Duration? = poolFallbackDelay
-        override val poolMaxRetry: Duration? = poolMaxRetry
+        override val poolMaxWaitDuration: Duration? = poolMaxWaitDuration
     }
 
     @Test
@@ -104,12 +102,12 @@ class ConfigStoreTest {
             listOf(
                 // nothing configured
                 provider(),
-                provider(poolRequestInterval = 2.seconds),
-                provider(poolRequestInterval = 3.seconds),
+                provider(poolCacheTtl = 2.seconds),
+                provider(poolCacheTtl = 3.seconds),
             )
         )
 
-        assertEquals(2.seconds, store.poolRequestInterval)
+        assertEquals(2.seconds, store.poolCacheTtl)
     }
 
     @Test
@@ -144,11 +142,10 @@ class ConfigStoreTest {
         )
 
         assertEquals(StatusesPool.DEFAULT_BATCH_WINDOW, store.poolBatchWindow)
-        assertEquals(StatusesPool.DEFAULT_REQUEST_INTERVAL, store.poolRequestInterval)
         assertEquals(StatusesPool.DEFAULT_CACHE_TTL, store.poolCacheTtl)
         assertEquals(StatusesPool.DEFAULT_MAX_CACHE_ENTRIES, store.poolMaxCacheEntries)
         assertEquals(StatusesPool.DEFAULT_RESET_MARGIN, store.poolResetMargin)
         assertEquals(StatusesPool.DEFAULT_FALLBACK_DELAY, store.poolFallbackDelay)
-        assertEquals(StatusesPool.DEFAULT_MAX_RETRY, store.poolMaxRetry)
+        assertEquals(StatusesPool.DEFAULT_MAX_WAIT_DURATION, store.poolMaxWaitDuration)
     }
 }

@@ -47,12 +47,11 @@ fun main() {
         val statusesPool = StatusesPool(
             statusesClient, this,
             batchWindow = config.poolBatchWindow,
-            requestInterval = config.poolRequestInterval,
             cacheTtl = config.poolCacheTtl,
             maxCacheEntries = config.poolMaxCacheEntries,
             resetMargin = config.poolResetMargin,
             fallbackDelay = config.poolFallbackDelay,
-            maxRetry = config.poolMaxRetry,
+            maxWaitDuration = config.poolMaxWaitDuration,
         )
         try {
             val userId = accountsClient.verifyCredentials().let {

@@ -43,9 +43,6 @@ class PropertiesConfigProvider(
     override val poolBatchWindow: Duration?
         get() = duration("poolBatchWindow")
 
-    override val poolRequestInterval: Duration?
-        get() = duration("poolRequestInterval")
-
     override val poolCacheTtl: Duration?
         get() = duration("poolCacheTtl")
 
@@ -58,8 +55,8 @@ class PropertiesConfigProvider(
     override val poolFallbackDelay: Duration?
         get() = duration("poolFallbackDelay")
 
-    override val poolMaxRetry: Duration?
-        get() = duration("poolMaxRetry")
+    override val poolMaxWaitDuration: Duration?
+        get() = duration("poolMaxWaitDuration")
 
     private fun duration(key: String): Duration? =
         parseDurationConfig(key, properties.getProperty(key))
