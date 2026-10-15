@@ -2,6 +2,13 @@
 
 Automatically translate toots.
 
+## Compatibility
+
+This project targets the account owner's locally authored posts on vanilla
+Mastodon. Compatibility with customized forks is not guaranteed. Footer HTML
+parsing assumptions are documented in `matchFooterFromContent` in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/llm/Footer.kt`.
+
 ## Access Token
 
 This project reuses the existing account so your followers don't need to follow a new account.

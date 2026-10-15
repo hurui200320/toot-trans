@@ -1,5 +1,9 @@
 package info.skyblond.fediverse.toot.trans.llm
 
+import io.github.oshai.kotlinlogging.KotlinLogging
+import org.jsoup.Jsoup
+import org.jsoup.nodes.TextNode
+
 /**
  * The marker line this bot appends as the last line of every
  * English translation reply: `🌐{hash}#{seq}#{total}`.
@@ -27,7 +31,7 @@ package info.skyblond.fediverse.toot.trans.llm
  * char or digit and followed by digits only — the marker travels
  * as plain text.
  *
- * [toString] renders the marker and [String.matchFooter] parses it
+ * [toString] renders the marker and [String.matchFooterFromText] parses it
  * back, so markers round-trip losslessly. Construction validates
  * fail-fast: [hash] must be exactly 8 chars of 0-9A-F, [total]
  * must be at least 1, and [seq] must be in 1..[total].
@@ -54,19 +58,19 @@ data class Footer(
     override fun toString(): String = """🌐$hash#$seq#$total"""
 
     companion object {
+        private val logger = KotlinLogging.logger { }
+
         private val footerRegex = Regex("""🌐([0-9A-F]{8})#(\d+)#(\d+)\s*""")
 
         /**
          * Match the footer on the last non-blank line of [this]
-         * cleaned text, or null when there is no valid footer.
+         * plain text, or null when there is no valid footer.
          *
-         * The caller owns the cleaning (HTML stripped to plain
-         * text, or a status source's raw text) and must guarantee
-         * that the footer, if present, is the last non-blank
-         * line. Trailing blank lines are tolerated — including
-         * the extra empty line Kotlin's line splitting appends
-         * for a trailing terminator — but any non-blank line
-         * after the marker disqualifies the marker.
+         * Pass composing text directly; for a status's HTML content,
+         * use [matchFooterFromContent] instead. Trailing blank lines
+         * are tolerated — including the extra empty line Kotlin's line
+         * splitting appends for a trailing terminator — but any
+         * non-blank line after the marker disqualifies the marker.
          *
          * A last line that carries text before or after the
          * marker, or whose marker merely looks regex-shaped but
@@ -74,7 +78,7 @@ data class Footer(
          * numbers beyond Int range) yields null: callers see "no
          * footer", never an exception.
          * */
-        fun String.matchFooter(): Footer? {
+        fun String.matchFooterFromText(): Footer? {
             // the footer, if any, owns the last non-blank line per
             // the contract above; skipping blanks also absorbs the
             // extra line a trailing terminator produces
@@ -90,6 +94,38 @@ data class Footer(
             } catch (_: IllegalArgumentException) {
                 null
             }
+        }
+
+        /**
+         * Match a footer in the HTML `content` of a locally authored
+         * post on vanilla Mastodon, without any status-source API call.
+         * Arbitrary federated rich text and customized forks are outside
+         * this adapter's compatibility contract.
+         *
+         * Vanilla's TextFormatter uses `<p>` for paragraphs and `<br>`
+         * for single line breaks. Add paragraph boundaries as text nodes;
+         * Jsoup's `wholeText()` supplies the `<br>` newlines, decodes
+         * entities, and joins inline elements without extra separators.
+         * This preserves logical lines, not exact composing text or
+         * browser layout. See Mastodon's `app/lib/text_formatter.rb`.
+         *
+         * Only pass `content`, not preview cards or other status fields.
+         * The result is passed untrimmed to [matchFooterFromText], which
+         * owns the matching and whitespace rules.
+         * */
+        fun String.matchFooterFromContent(): Footer? {
+            val body = Jsoup.parseBodyFragment(this).body()
+            body.select("p").forEach { paragraph ->
+                paragraph.before(TextNode("\n"))
+                paragraph.after(TextNode("\n"))
+            }
+            // Note we must NOT trim here. As the content might be
+            // `  <valid>`, note the leading space.
+            // This should not be considered as valid footer.
+            // And trim will make regex accept this
+            val text = body.wholeText()
+            logger.debug { "Cleaning HTML content field:\nContent:\n$this\nText:\n$text" }
+            return text.matchFooterFromText()
         }
     }
 }

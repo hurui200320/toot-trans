@@ -37,6 +37,8 @@ dependencies {
     // koin (DI)
     implementation(platform("io.insert-koin:koin-bom:$koinVersion"))
     implementation("io.insert-koin:koin-core")
+    // jsoup, clean up html
+    implementation("org.jsoup:jsoup:1.23.2")
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")

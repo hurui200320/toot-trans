@@ -8,8 +8,7 @@
     <root level="INFO">
         <appender-ref ref="STDOUT"/>
     </root>
-
-    <!-- Uncomment to see debug logs for foo.bar.*:
-    <logger name="info.skyblond.fediverse.foo.bar" level="DEBUG"/>
+    <!-- Uncomment to see debug logs for footer (mainly content HTML cleaning)
+    <logger name="info.skyblond.fediverse.toot.trans.llm.Footer" level="DEBUG"/>
     -->
 </configuration>

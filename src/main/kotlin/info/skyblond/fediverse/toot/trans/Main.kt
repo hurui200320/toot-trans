@@ -2,6 +2,7 @@ package info.skyblond.fediverse.toot.trans
 
 import info.skyblond.fediverse.toot.trans.di.appConfigStore
 import info.skyblond.fediverse.toot.trans.di.appModule
+import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooterFromContent
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
@@ -24,7 +25,7 @@ fun main() {
     val account = koin.get<CredentialAccount>()
     val rateLimitBackoff = koin.get<RateLimitBackoff>()
 
-    runBlocking {
+    val toots = runBlocking {
         // the first scan after boot up, see performInitialScan; runs
         // on the container's shared backoff so every caller on this
         // token backs off alike, see RateLimitBackoff's KDoc
@@ -33,8 +34,15 @@ fun main() {
             rateLimitBackoff = rateLimitBackoff,
             transientMaxRetry = config.scanTransientMaxRetry,
             transientRetryDelay = config.scanTransientRetryDelay,
-        ).forEach {
-            logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
-        }
+        )
+    }.onEach { // debugging print
+        logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
     }
+
+    val originalToots = toots.filter { toot ->
+        toot.content?.matchFooterFromContent() == null
+    }
+
+    logger.info { "Original toots: ${originalToots.size}" }
+
 }

@@ -1,6 +1,6 @@
 package info.skyblond.fediverse.toot.trans.llm
 
-import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooter
+import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooterFromText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -57,24 +57,24 @@ class FooterTest {
         assertEquals("🌐DEADBEEF#2#3", Footer("DEADBEEF", 2, 3).toString())
     }
 
-    // --- matchFooter: happy paths ---
+    // --- matchFooterFromText: happy paths ---
 
     @Test
     fun `matches a standalone footer`() {
-        assertEquals(Footer("A1B2C3D4", 1, 1), "🌐A1B2C3D4#1#1".matchFooter())
+        assertEquals(Footer("A1B2C3D4", 1, 1), "🌐A1B2C3D4#1#1".matchFooterFromText())
     }
 
     @Test
     fun `matches the footer on the last line of a translation`() {
         assertEquals(
             Footer("A1B2C3D4", 2, 3),
-            "Hello world!\nSecond line\n🌐A1B2C3D4#2#3".matchFooter(),
+            "Hello world!\nSecond line\n🌐A1B2C3D4#2#3".matchFooterFromText(),
         )
     }
 
     @Test
     fun `matches across crlf line endings`() {
-        assertEquals(Footer("A1B2C3D4", 1, 1), "Hello world!\r\n🌐A1B2C3D4#1#1".matchFooter())
+        assertEquals(Footer("A1B2C3D4", 1, 1), "Hello world!\r\n🌐A1B2C3D4#1#1".matchFooterFromText())
     }
 
     @Test
@@ -83,13 +83,13 @@ class FooterTest {
         // lines; the footer is still the last line
         assertEquals(
             Footer("A1B2C3D4", 1, 2),
-            "Paragraph one\n\nParagraph two\n\n🌐A1B2C3D4#1#2".matchFooter(),
+            "Paragraph one\n\nParagraph two\n\n🌐A1B2C3D4#1#2".matchFooterFromText(),
         )
     }
 
     @Test
     fun `tolerates trailing whitespace on the footer line`() {
-        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1 \t".matchFooter())
+        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1 \t".matchFooterFromText())
     }
 
     @Test
@@ -98,87 +98,87 @@ class FooterTest {
         // trailing terminator, and the caller's cleaning may leave
         // trailing whitespace-only lines; the footer is still the
         // last non-blank line
-        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1\n".matchFooter())
-        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1\n\n".matchFooter())
-        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1\n \t".matchFooter())
+        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1\n".matchFooterFromText())
+        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1\n\n".matchFooterFromText())
+        assertEquals(Footer("A1B2C3D4", 1, 1), "text\n🌐A1B2C3D4#1#1\n \t".matchFooterFromText())
     }
 
     @Test
     fun `matches multi-digit seq and total`() {
-        assertEquals(Footer("FFFFFFFF", 12, 345), "🌐FFFFFFFF#12#345".matchFooter())
+        assertEquals(Footer("FFFFFFFF", 12, 345), "🌐FFFFFFFF#12#345".matchFooterFromText())
     }
 
     @Test
     fun `only the last line counts when several footer lines exist`() {
-        assertEquals(Footer("A1B2C3D4", 2, 2), "🌐A1B2C3D4#1#2\n🌐A1B2C3D4#2#2".matchFooter())
+        assertEquals(Footer("A1B2C3D4", 2, 2), "🌐A1B2C3D4#1#2\n🌐A1B2C3D4#2#2".matchFooterFromText())
     }
 
     @Test
-    fun `round-trips toString through matchFooter`() {
+    fun `round-trips toString through matchFooterFromText`() {
         val footer = Footer("0F0F0F0F", 3, 7)
 
-        assertEquals(footer, footer.toString().matchFooter())
+        assertEquals(footer, footer.toString().matchFooterFromText())
     }
 
-    // --- matchFooter: no footer ---
+    // --- matchFooterFromText: no footer ---
 
     @Test
     fun `returns null for text without a footer`() {
-        assertNull("Just a normal toot".matchFooter())
-        assertNull("A1B2C3D4#1#1 without the globe".matchFooter())
+        assertNull("Just a normal toot".matchFooterFromText())
+        assertNull("A1B2C3D4#1#1 without the globe".matchFooterFromText())
     }
 
     @Test
     fun `returns null for empty or blank text`() {
-        assertNull("".matchFooter())
-        assertNull("   ".matchFooter())
-        assertNull("\n".matchFooter())
+        assertNull("".matchFooterFromText())
+        assertNull("   ".matchFooterFromText())
+        assertNull("\n".matchFooterFromText())
     }
 
     @Test
     fun `returns null when the footer is not the last line`() {
-        assertNull("🌐A1B2C3D4#1#1\nP.S. added later".matchFooter())
+        assertNull("🌐A1B2C3D4#1#1\nP.S. added later".matchFooterFromText())
     }
 
     @Test
     fun `returns null when the last line carries text around the marker`() {
         // text glued before the marker: the footer does not own the line
-        assertNull("prefix 🌐A1B2C3D4#1#1".matchFooter())
+        assertNull("prefix 🌐A1B2C3D4#1#1".matchFooterFromText())
         // indented marker: the regex anchors the marker to line start
-        assertNull("text\n  🌐A1B2C3D4#1#1".matchFooter())
+        assertNull("text\n  🌐A1B2C3D4#1#1".matchFooterFromText())
         // text after the marker: the line is not just the footer
-        assertNull("🌐A1B2C3D4#1#1 trailing".matchFooter())
+        assertNull("🌐A1B2C3D4#1#1 trailing".matchFooterFromText())
     }
 
-    // --- matchFooter: footer-shaped but invalid ---
+    // --- matchFooterFromText: footer-shaped but invalid ---
 
     @Test
     fun `returns null for wrong hash shapes`() {
         // 7 hex chars, 9 hex chars, lowercase, missing entirely
-        assertNull("🌐A1B2C3#1#1".matchFooter())
-        assertNull("🌐A1B2C3D4E#1#1".matchFooter())
-        assertNull("🌐a1b2c3d4#1#1".matchFooter())
-        assertNull("🌐#1#1".matchFooter())
+        assertNull("🌐A1B2C3#1#1".matchFooterFromText())
+        assertNull("🌐A1B2C3D4E#1#1".matchFooterFromText())
+        assertNull("🌐a1b2c3d4#1#1".matchFooterFromText())
+        assertNull("🌐#1#1".matchFooterFromText())
     }
 
     @Test
     fun `returns null for missing or extra footer parts`() {
-        assertNull("🌐A1B2C3D4#1".matchFooter())
-        assertNull("🌐A1B2C3D4".matchFooter())
-        assertNull("🌐A1B2C3D4#1#1#1".matchFooter())
+        assertNull("🌐A1B2C3D4#1".matchFooterFromText())
+        assertNull("🌐A1B2C3D4".matchFooterFromText())
+        assertNull("🌐A1B2C3D4#1#1#1".matchFooterFromText())
     }
 
     @Test
     fun `returns null for regex-valid but semantically invalid numbers`() {
         // seq below 1, total below 1, seq above total
-        assertNull("🌐A1B2C3D4#0#1".matchFooter())
-        assertNull("🌐A1B2C3D4#1#0".matchFooter())
-        assertNull("🌐A1B2C3D4#3#2".matchFooter())
+        assertNull("🌐A1B2C3D4#0#1".matchFooterFromText())
+        assertNull("🌐A1B2C3D4#1#0".matchFooterFromText())
+        assertNull("🌐A1B2C3D4#3#2".matchFooterFromText())
     }
 
     @Test
     fun `returns null for numbers beyond int range`() {
-        assertNull("🌐A1B2C3D4#99999999999#99999999999".matchFooter())
-        assertNull("🌐A1B2C3D4#1#2147483648".matchFooter())
+        assertNull("🌐A1B2C3D4#99999999999#99999999999".matchFooterFromText())
+        assertNull("🌐A1B2C3D4#1#2147483648".matchFooterFromText())
     }
 }
