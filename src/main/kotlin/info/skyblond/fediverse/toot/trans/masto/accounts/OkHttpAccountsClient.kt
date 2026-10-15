@@ -33,13 +33,13 @@ class OkHttpAccountsClient(
         require(minId == null || minId.isNotBlank()) { "minId must not be blank" }
         require(maxId == null || maxId.isNotBlank()) { "maxId must not be blank" }
 
-        val params = buildMap {
-            put("limit", limit.toString())
-            sinceId?.let { put("since_id", it) }
-            minId?.let { put("min_id", it) }
-            maxId?.let { put("max_id", it) }
+        val params = buildMap<String, List<String>> {
+            put("limit", listOf(limit.toString()))
+            sinceId?.let { put("since_id", listOf(it)) }
+            minId?.let { put("min_id", listOf(it)) }
+            maxId?.let { put("max_id", listOf(it)) }
             // only non-default values go on the wire, like the cursors above
-            if (excludeReblogs) put("exclude_reblogs", "true")
+            if (excludeReblogs) put("exclude_reblogs", listOf("true"))
         }
         return api.get(
             path = listOf("api", "v1", "accounts", accountId, "statuses"),

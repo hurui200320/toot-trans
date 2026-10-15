@@ -1,6 +1,7 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiClient
+import kotlinx.serialization.builtins.ListSerializer
 import java.net.URLEncoder
 import java.security.MessageDigest
 
@@ -25,6 +26,21 @@ class OkHttpStatusesClient(
         return api.get(
             path = listOf("api", "v1", "statuses", statusId),
             deserializer = Status.serializer(),
+        )
+    }
+
+    override suspend fun getStatuses(statusIds: Set<String>): List<Status> {
+        require(statusIds.isNotEmpty()) { "statusIds must not be empty" }
+        require(statusIds.size <= StatusesClient.MAX_IDS_PER_CALL) {
+            "statusIds must hold at most ${StatusesClient.MAX_IDS_PER_CALL} ids, got ${statusIds.size}"
+        }
+        require(statusIds.none { it.isBlank() }) { "statusIds must not contain blank ids" }
+        return api.get(
+            path = listOf("api", "v1", "statuses"),
+            // the id set maps to repeated id[] query parameters,
+            // see the wire docs on [StatusesClient.getStatuses]
+            params = mapOf("id[]" to statusIds.toList()),
+            deserializer = ListSerializer(Status.serializer()),
         )
     }
 

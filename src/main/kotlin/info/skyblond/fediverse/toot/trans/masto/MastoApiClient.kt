@@ -56,18 +56,23 @@ class MastoApiClient(
 
     /**
      * GET [path] with [params] as the query string, and decode the
-     * response body as [T].
+     * response body as [T]. Each name maps to the values sent under
+     * it, one query parameter per entry: Mastodon array parameters
+     * repeat one key (e.g. `id[]`), which a name-to-value map cannot
+     * express.
      *
      * Fails fast: non-2xx responses throw [MastoApiException], malformed
      * JSON throws [SerializationException].
      * */
     suspend fun <T> get(
         path: List<String>,
-        params: Map<String, String> = emptyMap(),
+        params: Map<String, List<String>> = emptyMap(),
         deserializer: DeserializationStrategy<T>,
     ): T {
         val url = requestUrl(path).apply {
-            params.forEach { (name, value) -> addQueryParameter(name, value) }
+            params.forEach { (name, values) ->
+                values.forEach { value -> addQueryParameter(name, value) }
+            }
         }.build()
 
         val request = authorizedRequest(url).get().build()

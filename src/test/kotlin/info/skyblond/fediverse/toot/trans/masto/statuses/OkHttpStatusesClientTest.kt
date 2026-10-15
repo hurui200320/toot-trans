@@ -61,6 +61,12 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
         sensitive = true,
     )
 
+    // a Status trimmed to its required fields, see Models.kt; for
+    // tests needing many statuses at once
+    private fun minimalStatusJson(id: String): String =
+        """{"id": "$id", "created_at": "2022-08-24T22:29:46.493Z", """ +
+            """"sensitive": false, "visibility": "public", "media_attachments": []}"""
+
     @Test
     fun `getStatus parses the status and ignores unknown fields`() {
         enqueueJson(200, statusJson)
@@ -104,6 +110,138 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
         runBlocking {
             assertFailsWith<IllegalArgumentException> { client.getStatus(" ") }
         }
+    }
+
+    @Test
+    fun `getStatuses fetches all ids in one call and parses the array`() {
+        // the first status is the full sample; the second is trimmed
+        // to its required fields plus an unknown one, to prove it is
+        // ignored
+        enqueueJson(
+            200,
+            """
+            [
+              $statusJson,
+              {
+                "id": "108880211901672326",
+                "created_at": "2022-08-24T22:29:46.493Z",
+                "sensitive": false,
+                "visibility": "public",
+                "media_attachments": [],
+                "some_future_field": [1, 2, 3]
+              }
+            ]
+            """.trimIndent()
+        )
+
+        val statuses = runBlocking {
+            client.getStatuses(setOf("103254962155278888", "108880211901672326"))
+        }
+
+        assertEquals(2, statuses.size)
+        assertEquals("103254962155278888", statuses[0].id)
+        assertEquals("public", statuses[0].visibility)
+        assertEquals("108880211901672326", statuses[1].id)
+        assertEquals("2022-08-24T22:29:46.493Z", statuses[1].createdAt)
+
+        val recorded = server.takeRequest()
+        assertEquals("GET", recorded.method)
+        // `id[]` is percent-encoded by OkHttp; Rack (and thus the
+        // instance) decodes `%5B%5D` back into the array parameter,
+        // so this is the wire-equivalent of `?id[]=...&id[]=...`
+        assertEquals(
+            "/api/v1/statuses?id%5B%5D=103254962155278888&id%5B%5D=108880211901672326",
+            recorded.target
+        )
+        assertEquals("Bearer test-token", recorded.headers["Authorization"])
+        assertEquals("toot-trans", recorded.headers["User-Agent"])
+    }
+
+    @Test
+    fun `getStatuses returns fewer statuses when an id is unknown to the instance`() {
+        // the instance silently omits missing or invisible statuses,
+        // see StatusesClient.getStatuses
+        enqueueJson(200, "[$statusJson]")
+
+        val statuses = runBlocking {
+            client.getStatuses(setOf("103254962155278888", "missing"))
+        }
+
+        assertEquals(1, statuses.size)
+        assertEquals("103254962155278888", statuses[0].id)
+    }
+
+    @Test
+    fun `getStatuses returns an empty list when no id resolves`() {
+        // e.g. all requested toots have been deleted
+        enqueueJson(200, "[]")
+
+        val statuses = runBlocking { client.getStatuses(setOf("1", "2")) }
+
+        assertEquals(0, statuses.size)
+    }
+
+    @Test
+    fun `getStatuses surfaces the server error on 401`() {
+        // instances with authorized-fetch mode answer 401
+        enqueueJson(401, """{"error": "This API requires an authenticated user"}""")
+
+        val e = runBlocking {
+            assertFailsWith<MastoApiException> {
+                client.getStatuses(setOf("103254962155278888"))
+            }
+        }
+
+        assertEquals(401, e.httpCode)
+        assertEquals("This API requires an authenticated user", e.detail)
+    }
+
+    @Test
+    fun `getStatuses rejects an empty id set`() {
+        // a request without any id[] is pointless; fail fast instead
+        val e = runBlocking {
+            assertFailsWith<IllegalArgumentException> { client.getStatuses(emptySet()) }
+        }
+
+        assertEquals("statusIds must not be empty", e.message)
+    }
+
+    @Test
+    fun `getStatuses rejects a blank id`() {
+        val e = runBlocking {
+            assertFailsWith<IllegalArgumentException> {
+                client.getStatuses(setOf("103254962155278888", " "))
+            }
+        }
+
+        assertEquals("statusIds must not contain blank ids", e.message)
+    }
+
+    @Test
+    fun `getStatuses rejects more ids than the instance accepts`() {
+        // the instance answers 422 beyond 20 unique ids, and the
+        // client guards it before the round trip
+        val tooManyIds = (1..21).map { it.toString() }.toSet()
+
+        val e = runBlocking {
+            assertFailsWith<IllegalArgumentException> { client.getStatuses(tooManyIds) }
+        }
+
+        assertEquals("statusIds must hold at most 20 ids, got 21", e.message)
+    }
+
+    @Test
+    fun `getStatuses accepts exactly the cap of ids`() {
+        // 20 ids is the largest request the instance accepts, so
+        // the guard must not reject the boundary itself
+        val ids = (1..StatusesClient.MAX_IDS_PER_CALL).map { it.toString() }
+        val body = ids.joinToString(",", "[", "]") { minimalStatusJson(it) }
+        enqueueJson(200, body)
+
+        val statuses = runBlocking { client.getStatuses(ids.toSet()) }
+
+        assertEquals(StatusesClient.MAX_IDS_PER_CALL, statuses.size)
+        assertEquals(ids, statuses.map { it.id })
     }
 
     @Test
