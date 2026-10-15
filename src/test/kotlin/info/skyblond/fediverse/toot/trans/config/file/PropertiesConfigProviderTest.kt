@@ -178,6 +178,45 @@ class PropertiesConfigProviderTest {
     }
 
     @Test
+    fun `reads target lang configs from the properties file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText(
+            """
+            targetLanguage=Simplified Chinese
+            targetLangCode=zh-CN
+            """.trimIndent()
+        )
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertEquals("Simplified Chinese", provider.targetLanguage)
+        // a regional tag, taken as-is like any other value
+        assertEquals("zh-CN", provider.targetLangCode)
+    }
+
+    @Test
+    fun `returns null for target lang keys missing from the file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("mastoHost=https://m.skyblond.info/\n")
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertNull(provider.targetLanguage)
+        assertNull(provider.targetLangCode)
+    }
+
+    @Test
+    fun `blank target lang values are treated as not configured`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("targetLanguage=\ntargetLangCode=   \n")
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertNull(provider.targetLanguage)
+        assertNull(provider.targetLangCode)
+    }
+
+    @Test
     fun `blank pool values are treated as not configured`(@TempDir tempDir: File) {
         val file = tempDir.resolve("config.properties")
         file.writeText("poolBatchWindow=\n")

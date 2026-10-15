@@ -66,6 +66,8 @@ class EnvConfigProviderTest {
         assertNull(provider.initialScanSize)
         assertNull(provider.scanTransientMaxRetry)
         assertNull(provider.scanTransientRetryDelay)
+        assertNull(provider.targetLanguage)
+        assertNull(provider.targetLangCode)
     }
 
     @Test
@@ -93,6 +95,33 @@ class EnvConfigProviderTest {
 
         assertEquals(5, provider.scanTransientMaxRetry)
         assertEquals(30.seconds, provider.scanTransientRetryDelay)
+    }
+
+    @Test
+    fun `reads target lang configs from the environment`() {
+        val provider = EnvConfigProvider(
+            mapOf(
+                "TARGET_LANGUAGE" to "Simplified Chinese",
+                // a regional tag, taken as-is like any other value
+                "TARGET_LANG_CODE" to "zh-CN",
+            )::get
+        )
+
+        assertEquals("Simplified Chinese", provider.targetLanguage)
+        assertEquals("zh-CN", provider.targetLangCode)
+    }
+
+    @Test
+    fun `blank target lang env values are treated as not configured`() {
+        val provider = EnvConfigProvider(
+            mapOf(
+                "TARGET_LANGUAGE" to "   ",
+                "TARGET_LANG_CODE" to " ",
+            )::get
+        )
+
+        assertNull(provider.targetLanguage)
+        assertNull(provider.targetLangCode)
     }
 
     @Test

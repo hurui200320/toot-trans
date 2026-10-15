@@ -128,4 +128,7 @@ fun appConfigStore(
 ).also { config ->
     // logging also serves as sanity check
     config.mastoHost.let { logger.info { "Configured server host: $it" } }
+    val lang = config.targetLanguage
+    val langCode = config.targetLangCode
+    logger.info { "Configured target language: $lang ($langCode)" }
 }

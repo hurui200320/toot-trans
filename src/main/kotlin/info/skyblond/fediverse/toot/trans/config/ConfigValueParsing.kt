@@ -30,3 +30,16 @@ fun parseIntConfig(name: String, raw: String?): Int? {
     return raw.trim().toIntOrNull()
         ?: throw IllegalArgumentException("Config `$name` has an invalid integer value: `$raw`")
 }
+
+/**
+ * Parse a plain string from a raw config value, trimming surrounding
+ * whitespace so the value can be used as-is.
+ *
+ * Blank input means "not configured" and returns null so the [ConfigStore]
+ * fallback can continue, same as [parseDurationConfig]; any other value is
+ * accepted, so this never throws and needs no config name for an error.
+ * */
+fun parseStringConfig(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    return raw.trim()
+}

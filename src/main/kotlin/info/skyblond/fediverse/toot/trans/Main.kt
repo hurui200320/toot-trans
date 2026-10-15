@@ -25,6 +25,8 @@ fun main() {
     val account = koin.get<CredentialAccount>()
     val rateLimitBackoff = koin.get<RateLimitBackoff>()
 
+    val langCode = config.targetLangCode
+
     val toots = runBlocking {
         // the first scan after boot up, see performInitialScan; runs
         // on the container's shared backoff so every caller on this
@@ -35,14 +37,21 @@ fun main() {
             transientMaxRetry = config.scanTransientMaxRetry,
             transientRetryDelay = config.scanTransientRetryDelay,
         )
+    }
+
+    val translatedToots = toots.filter { toot ->
+        toot.content?.matchFooterFromContent() != null && toot.language == langCode
     }.onEach { // debugging print
-        logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
+        logger.info { "Translated toot: id=${it.id}, lang=${it.language}, time=${it.editedAt ?: it.createdAt}, content: ${it.content}" }
     }
 
     val originalToots = toots.filter { toot ->
-        toot.content?.matchFooterFromContent() == null
+        toot.content?.matchFooterFromContent() == null && toot.language != langCode
+    }.onEach { // debugging print
+        logger.info { "Original toot: id=${it.id}, lang=${it.language}, time=${it.editedAt ?: it.createdAt}, content: ${it.content}" }
     }
 
     logger.info { "Original toots: ${originalToots.size}" }
+    logger.info { "Translated toots: ${translatedToots.size}" }
 
 }

@@ -34,4 +34,10 @@ class DefaultConfigProvider : ConfigProvider {
     // apart either
     override val scanTransientMaxRetry: Int = DEFAULT_TRANSIENT_MAX_RETRY
     override val scanTransientRetryDelay: Duration = DEFAULT_TRANSIENT_RETRY_DELAY
+
+    // required config, no default
+    override val targetLanguage: String? = null
+
+    // required config, no default
+    override val targetLangCode: String? = null
 }

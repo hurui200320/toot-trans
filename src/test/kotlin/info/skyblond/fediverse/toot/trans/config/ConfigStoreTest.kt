@@ -26,6 +26,8 @@ class ConfigStoreTest {
         initialScanSize: Int? = null,
         scanTransientMaxRetry: Int? = null,
         scanTransientRetryDelay: Duration? = null,
+        targetLanguage: String? = null,
+        targetLangCode: String? = null,
     ): ConfigProvider = object : ConfigProvider {
         override val mastoHost: String? = mastoHost
         override val accessToken: String? = accessToken
@@ -38,6 +40,8 @@ class ConfigStoreTest {
         override val initialScanSize: Int? = initialScanSize
         override val scanTransientMaxRetry: Int? = scanTransientMaxRetry
         override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
+        override val targetLanguage: String? = targetLanguage
+        override val targetLangCode: String? = targetLangCode
     }
 
     @Test
@@ -244,6 +248,61 @@ class ConfigStoreTest {
 
         val exception = assertFailsWith<MissingConfigException> { store.scanTransientMaxRetry }
         assertTrue(exception.message!!.contains("scan transient max retry"))
+    }
+
+    @Test
+    fun `target lang configs follow the first non-null provider`() {
+        val store = ConfigStore(
+            listOf(
+                provider(targetLanguage = "English", targetLangCode = "en"),
+                provider(targetLanguage = "Japanese", targetLangCode = "ja"),
+            )
+        )
+
+        assertEquals("English", store.targetLanguage)
+        assertEquals("en", store.targetLangCode)
+    }
+
+    @Test
+    fun `target lang configs skip nulls and fall back to later providers`() {
+        val store = ConfigStore(
+            listOf(
+                // nothing configured
+                provider(),
+                provider(targetLanguage = "Japanese", targetLangCode = "ja"),
+                provider(targetLanguage = "German", targetLangCode = "de"),
+            )
+        )
+
+        assertEquals("Japanese", store.targetLanguage)
+        assertEquals("ja", store.targetLangCode)
+    }
+
+    @Test
+    fun `throws when no provider supplies the target lang configs`() {
+        val store = ConfigStore(listOf(provider()))
+
+        val missingLanguage = assertFailsWith<MissingConfigException> { store.targetLanguage }
+        assertTrue(missingLanguage.message!!.contains("target language"))
+        val missingCode = assertFailsWith<MissingConfigException> { store.targetLangCode }
+        assertTrue(missingCode.message!!.contains("target lang code"))
+    }
+
+    @Test
+    fun `target lang configs have no built-in default`() {
+        val store = ConfigStore(
+            listOf(
+                provider(),
+                DefaultConfigProvider()
+            )
+        )
+
+        // like the host and token, these are required: the built-in
+        // default provider must not silently invent a target language
+        val missingLanguage = assertFailsWith<MissingConfigException> { store.targetLanguage }
+        assertTrue(missingLanguage.message!!.contains("target language"))
+        val missingCode = assertFailsWith<MissingConfigException> { store.targetLangCode }
+        assertTrue(missingCode.message!!.contains("target lang code"))
     }
 
     @Test

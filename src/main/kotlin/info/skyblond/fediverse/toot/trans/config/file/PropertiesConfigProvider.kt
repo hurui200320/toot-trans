@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans.config.file
 import info.skyblond.fediverse.toot.trans.config.ConfigProvider
 import info.skyblond.fediverse.toot.trans.config.parseDurationConfig
 import info.skyblond.fediverse.toot.trans.config.parseIntConfig
+import info.skyblond.fediverse.toot.trans.config.parseStringConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
 import java.util.Properties
@@ -67,11 +68,20 @@ class PropertiesConfigProvider(
     override val scanTransientRetryDelay: Duration?
         get() = duration("scanTransientRetryDelay")
 
+    override val targetLanguage: String?
+        get() = string("targetLanguage")
+
+    override val targetLangCode: String?
+        get() = string("targetLangCode")
+
     private fun duration(key: String): Duration? =
         parseDurationConfig(key, properties.getProperty(key))
 
     private fun int(key: String): Int? =
         parseIntConfig(key, properties.getProperty(key))
+
+    private fun string(key: String): String? =
+        parseStringConfig(properties.getProperty(key))
 
     companion object {
         private val logger = KotlinLogging.logger { }

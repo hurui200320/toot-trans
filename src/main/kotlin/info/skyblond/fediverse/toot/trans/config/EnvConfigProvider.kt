@@ -44,9 +44,18 @@ class EnvConfigProvider(
     override val scanTransientRetryDelay: Duration?
         get() = duration("SCAN_TRANSIENT_RETRY_DELAY")
 
+    override val targetLanguage: String?
+        get() = string("TARGET_LANGUAGE")
+
+    override val targetLangCode: String?
+        get() = string("TARGET_LANG_CODE")
+
     private fun duration(name: String): Duration? =
         parseDurationConfig(name, env(name))
 
     private fun int(name: String): Int? =
         parseIntConfig(name, env(name))
+
+    private fun string(name: String): String? =
+        parseStringConfig(env(name))
 }

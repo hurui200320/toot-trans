@@ -27,6 +27,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -56,6 +57,8 @@ class AppModuleTest {
         initialScanSize: Int? = null,
         scanTransientMaxRetry: Int? = null,
         scanTransientRetryDelay: Duration? = null,
+        targetLanguage: String? = null,
+        targetLangCode: String? = null,
     ): ConfigStore = ConfigStore(
         listOf(
             object : ConfigProvider {
@@ -70,6 +73,8 @@ class AppModuleTest {
                 override val initialScanSize: Int? = initialScanSize
                 override val scanTransientMaxRetry: Int? = scanTransientMaxRetry
                 override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
+                override val targetLanguage: String? = targetLanguage
+                override val targetLangCode: String? = targetLangCode
             },
             DefaultConfigProvider(),
         )
@@ -294,12 +299,17 @@ class AppModuleTest {
     @Test
     fun `config chain keeps provider precedence`(@TempDir tempDir: File) {
         val file = tempDir.resolve("config.properties")
-        file.writeText("mastoHost=https://file.example/\naccessToken=fileToken\n")
+        file.writeText(
+            "mastoHost=https://file.example/\n" +
+                    "accessToken=fileToken\n" +
+                    "targetLanguage=English\ntargetLangCode=en\n"
+        )
 
         val store = appConfigStore(
             env = mapOf(
                 "MASTO_HOST" to "https://env.example/",
                 "INITIAL_SCAN_SIZE" to "5",
+                "TARGET_LANG_CODE" to "ja",
             )::get,
             propertiesPath = file.absolutePath,
         )
@@ -307,9 +317,29 @@ class AppModuleTest {
         // environment variables beat the properties file
         assertEquals("https://env.example/", store.mastoHost)
         assertEquals(5, store.initialScanSize)
+        assertEquals("ja", store.targetLangCode)
         // the properties file beats the built-in defaults
         assertEquals("fileToken", store.accessToken)
+        assertEquals("English", store.targetLanguage)
         // the defaults fill what nobody configured
         assertEquals(StatusesPool.DEFAULT_BATCH_WINDOW, store.poolBatchWindow)
+    }
+
+    @Test
+    fun `missing target lang config fails appConfigStore before boot`(@TempDir tempDir: File) {
+        // host and token are configured, but the required target lang
+        // configs are not: the sanity log in [appConfigStore] resolves
+        // them, so the boot fails instead of running with a half-empty
+        // config
+        val file = tempDir.resolve("config.properties")
+        file.writeText("mastoHost=https://file.example/\naccessToken=fileToken\n")
+
+        val e = assertFailsWith<MissingConfigException> {
+            appConfigStore(
+                env = emptyMap<String, String>()::get,
+                propertiesPath = file.absolutePath,
+            )
+        }
+        assertTrue(e.message!!.contains("target language"))
     }
 }

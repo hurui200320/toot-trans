@@ -71,4 +71,28 @@ interface ConfigProvider {
      * `performInitialScan` in `Scan.kt`.
      * */
     val scanTransientRetryDelay: Duration?
+
+    /**
+     * Target language for translation in plain text.
+     * For example, "English" or "Simplified Chinese".
+     * */
+    val targetLanguage: String?
+
+    /**
+     * Target language code for translation, sent to the instance as-is
+     * when posting the translated replies. The instance validates the
+     * tag case-sensitively against its supported locale list, so what
+     * it stores may differ from what was posted: tags on the list
+     * round-trip unchanged (`en`, `zh-CN`, `zh-TW`); anything else
+     * whose base tag is on the list is reduced to that base (`en-US`
+     * and even `en-GB` become `en`, `zh-cn` becomes `zh`); anything
+     * else makes the instance silently fall back to the account's
+     * posting language — the exact rules live server-side, in
+     * Mastodon's `PostStatusService` and `valid_locale_or_nil` from
+     * `languages_helper.rb`. Fetched statuses are matched against this
+     * config exactly (see `Main.kt`), so the value must be a tag the
+     * instance stores as-is.
+     * For example, "en", "zh", "zh-CN".
+     * */
+    val targetLangCode: String?
 }

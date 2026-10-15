@@ -9,6 +9,11 @@ Mastodon. Compatibility with customized forks is not guaranteed. Footer HTML
 parsing assumptions are documented in `matchFooterFromContent` in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/llm/Footer.kt`.
 
+Also this project requires your own toots have the correct language tag.
+For example, if you post zh-CN and want to translate into en, but all your toots
+are tagged en for some reason, then this project will ignore those toots,
+as to the code, they are already in English.
+
 ## Access Token
 
 This project reuses the existing account so your followers don't need to follow a new account.
@@ -59,6 +64,8 @@ If a required setting is not provided by any source, the app fails to start with
 | Initial scan size | `INITIAL_SCAN_SIZE` | `initialScanSize` | No, default `40` | `20` |
 | Scan transient max retry | `SCAN_TRANSIENT_MAX_RETRY` | `scanTransientMaxRetry` | No, default `10` | `5` |
 | Scan transient retry delay | `SCAN_TRANSIENT_RETRY_DELAY` | `scanTransientRetryDelay` | No, default `10s` | `30s` |
+| Target language | `TARGET_LANGUAGE` | `targetLanguage` | Yes | `English` |
+| Target lang code | `TARGET_LANG_CODE` | `targetLangCode` | Yes | `en` |
 
 The `pool*` settings tune `StatusesPool`; their batching and caching semantics
 are documented in its KDoc in
@@ -72,6 +79,15 @@ the boot-up scan fetches and feeds into the pool, and the `scanTransient*`
 ones bound that scan's retries of transient failures (5xx and transport
 errors; 429 backoff is governed by the `backoff*` settings instead), see
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`.
+The `target*` pair picks the translation output: `targetLanguage` is the
+plain-text language name (e.g. `English`, `Simplified Chinese`), and
+`targetLangCode` is the language tag (e.g. `en`, `zh-CN`) used to tag the
+posted translations; both are required, so each deployment decides its
+target language at startup. How the instance validates and normalizes the
+tag — which tags round-trip unchanged, and why the configured value must
+be one of them for the bot to recognize its own replies — is documented
+on `targetLangCode`'s KDoc in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/config/ConfigProvider.kt`.
 Duration values accept units like `500ms`, `1s`, `2m`, `24h`, as well as
 ISO-8601 durations like `PT24H`. An empty value is treated as unset; a
 malformed or out-of-range value fails startup with an error naming the
@@ -85,6 +101,8 @@ Example `config.properties`:
 ```properties
 mastoHost=https://mastodon.social/
 accessToken=your-access-token
+targetLanguage=English
+targetLangCode=en
 ```
 
 ## Shared status lookups

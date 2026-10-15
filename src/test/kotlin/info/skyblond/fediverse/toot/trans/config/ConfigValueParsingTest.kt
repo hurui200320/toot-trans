@@ -29,6 +29,8 @@ class ConfigValueParsingTest {
     fun `trims surrounding whitespace`() {
         assertEquals(1.seconds, parseDurationConfig("poolBatchWindow", " 1s "))
         assertEquals(100, parseIntConfig("poolMaxCacheEntries", " 100 "))
+        assertEquals("English", parseStringConfig(" English "))
+        assertEquals("zh-CN", parseStringConfig(" zh-CN "))
     }
 
     @Test
@@ -38,6 +40,9 @@ class ConfigValueParsingTest {
         assertNull(parseDurationConfig("poolBatchWindow", "   "))
         assertNull(parseIntConfig("poolMaxCacheEntries", null))
         assertNull(parseIntConfig("poolMaxCacheEntries", ""))
+        assertNull(parseStringConfig(null))
+        assertNull(parseStringConfig(""))
+        assertNull(parseStringConfig("   "))
     }
 
     @Test
@@ -70,5 +75,15 @@ class ConfigValueParsingTest {
         }
         assertTrue(e.message!!.contains("poolMaxCacheEntries"))
         assertTrue(e.message!!.contains("lots"))
+    }
+
+    @Test
+    fun `parses plain strings`() {
+        assertEquals("English", parseStringConfig("English"))
+        assertEquals("Simplified Chinese", parseStringConfig("Simplified Chinese"))
+        // regional language tags pass through unchanged, see
+        // [ConfigProvider.targetLangCode]'s KDoc for why they are valid
+        assertEquals("zh-CN", parseStringConfig("zh-CN"))
+        assertEquals("en", parseStringConfig("en"))
     }
 }
