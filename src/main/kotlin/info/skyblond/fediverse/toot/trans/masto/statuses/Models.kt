@@ -1,7 +1,14 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import java.time.Instant
 
 /**
  * A toot, with only the fields this project needs.
@@ -14,9 +21,12 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Status(
     val id: String,
-    @SerialName("created_at") val createdAt: String,
+    // dates arrive as RFC3339 strings, see [Rfc3339InstantSerializer]
+    @Serializable(with = Rfc3339InstantSerializer::class)
+    @SerialName("created_at") val createdAt: Instant,
     val content: String? = null,
-    @SerialName("edited_at") val editedAt: String? = null,
+    @Serializable(with = Rfc3339InstantSerializer::class)
+    @SerialName("edited_at") val editedAt: Instant? = null,
     @SerialName("in_reply_to_id") val inReplyToId: String? = null,
     @SerialName("in_reply_to_account_id") val inReplyToAccountId: String? = null,
     val language: String? = null,
@@ -112,3 +122,22 @@ data class CreateStatusRequest(
     val spoilerText: String? = null,
     val sensitive: Boolean? = null,
 )
+
+/**
+ * [Instant] over the wire: Mastodon dates are the “Internet Date/Time
+ * Format” defined in RFC3339 section 5.6, e.g. `2022-08-24T22:29:46.493Z`
+ * (offsets like `+08:00` are legal too).
+ * https://docs.joinmastodon.org/api/datetime-format/#datetime
+ *
+ * `Instant.parse`/`toString` cover exactly that grammar, so an
+ * unparseable date fails the whole decode (fail-fast on a broken
+ * instance response) instead of silently nulling the field.
+ * */
+object Rfc3339InstantSerializer : KSerializer<Instant> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("java.time.Instant", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
+
+    override fun serialize(encoder: Encoder, value: Instant) = encoder.encodeString(value.toString())
+}

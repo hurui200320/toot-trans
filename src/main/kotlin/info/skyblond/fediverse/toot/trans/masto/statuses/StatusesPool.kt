@@ -1,6 +1,7 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
+import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -16,12 +17,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.time.Clock
-import java.time.Instant
-import java.time.format.DateTimeParseException
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeMark
@@ -42,19 +38,18 @@ import kotlin.time.TimeSource
  *
  * The size-bounded LRU cache expires after insertion, never after access.
  * Omitted IDs resolve to null without caching; callers should avoid repeatedly
- * requesting missing statuses. Other errors fail that batch's callers.
- * 429s suspend the worker until the reset plus [resetMargin]; resets that are
- * missing, unparseable, or further out than [maxWaitDuration] count as unusable
- * headers and use a fixed [fallbackDelay] instead, with no automatic retry
- * of other errors.
+ * requesting missing statuses. 429s suspend the worker for the wait computed
+ * by the shared [rateLimitBackoff] — see [RateLimitBackoff] for the
+ * reset-header semantics and its fallback — then retry the batch; other
+ * errors fail that batch's callers with no automatic retry.
  * Cache hits and [seed] remain available during backoff.
  *
  * The worker belongs to [scope]. Call [close] before waiting for that
  * scope to finish. Individual callers cannot cancel shared work;
  * queued work remains useful for caching even if all its callers cancel.
  * Distinct outstanding IDs remain in an unbounded FIFO queue.
- * Timing uses [timeSource] for elapsed durations and [clock] for server
- * reset timestamps, allowing deterministic tests without wall-clock sleeps.
+ * Timing uses [timeSource] for elapsed durations, allowing deterministic
+ * tests without wall-clock sleeps.
  */
 class StatusesPool(
     private val client: StatusesClient,
@@ -62,10 +57,7 @@ class StatusesPool(
     private val batchWindow: Duration = DEFAULT_BATCH_WINDOW,
     private val cacheTtl: Duration = DEFAULT_CACHE_TTL,
     private val maxCacheEntries: Int = DEFAULT_MAX_CACHE_ENTRIES,
-    private val resetMargin: Duration = DEFAULT_RESET_MARGIN,
-    private val fallbackDelay: Duration = DEFAULT_FALLBACK_DELAY,
-    private val maxWaitDuration: Duration = DEFAULT_MAX_WAIT_DURATION,
-    private val clock: Clock = Clock.systemUTC(),
+    private val rateLimitBackoff: RateLimitBackoff = RateLimitBackoff(),
     private val timeSource: TimeSource = TimeSource.Monotonic,
 ) : AutoCloseable {
 
@@ -99,18 +91,12 @@ class StatusesPool(
     init {
         requireValidDuration("batchWindow", batchWindow)
         requireValidDuration("cacheTtl", cacheTtl)
-        requireValidDuration("fallbackDelay", fallbackDelay)
-        requireValidDuration("maxWaitDuration", maxWaitDuration)
-        require(resetMargin.isFinite() && resetMargin >= Duration.ZERO) { "resetMargin must be finite and non-negative" }
         require(maxCacheEntries > 0) { "maxCacheEntries must be positive" }
 
         logger.info {
             "StatusesPool initialized with " +
                     "batchWindow=$batchWindow, " +
                     "cacheTtl=$cacheTtl, " +
-                    "fallbackDelay=$fallbackDelay, " +
-                    "maxWaitDuration=$maxWaitDuration, " +
-                    "resetMargin=$resetMargin, " +
                     "maxCacheEntries=$maxCacheEntries"
         }
     }
@@ -250,7 +236,7 @@ class StatusesPool(
                     throw e
                 } catch (e: Exception) {
                     if (e is MastoApiException && e.httpCode == 429) {
-                        val wait = resetWait(e) ?: fallbackDelay
+                        val wait = rateLimitBackoff.waitDuration(e)
                         logger.warn { "Rate limited fetching ${active.size} statuses, backing off $wait" }
                         delay(wait)
                     } else {
@@ -269,24 +255,6 @@ class StatusesPool(
         }
     }
 
-    private fun resetWait(error: MastoApiException): Duration? {
-        val raw = error.rateLimitReset ?: return null
-        val reset = try {
-            Instant.parse(raw)
-        } catch (_: DateTimeParseException) {
-            return null
-        }
-        val now = clock.instant()
-        if (!reset.isAfter(now)) return null
-        val wait = java.time.Duration.between(now, reset)
-        // Windows can legitimately be long on customized instances, so
-        // distance alone does not flag a broken header; [maxWaitDuration] is the
-        // sanity line. Beyond it the header is treated as unusable so a
-        // pathological timestamp cannot park the worker indefinitely.
-        if (wait > java.time.Duration.ofMillis(maxWaitDuration.inWholeMilliseconds)) return null
-        return wait.seconds.seconds + (wait.nano / 1_000_000).milliseconds + resetMargin
-    }
-
     /**
      * Shared duration check for the `init` block; the [name] parameter
      * makes each error name the offending setting, which surfaces in
@@ -301,17 +269,11 @@ class StatusesPool(
          * Built-in defaults for the optional constructor parameters. They are
          * the single source of truth: the config package's default provider
          * reuses them, so the app's deploy defaults cannot drift apart from
-         * the programmatic/test defaults.
+         * the programmatic/test defaults. The 429 backoff defaults live in
+         * [RateLimitBackoff]'s companion object for the same reason.
          * */
         val DEFAULT_BATCH_WINDOW: Duration = 1.seconds
         val DEFAULT_CACHE_TTL: Duration = 1.minutes
         val DEFAULT_MAX_CACHE_ENTRIES: Int = 1_000
-
-        /** Big margin for a very inaccurate system clock. */
-        val DEFAULT_RESET_MARGIN: Duration = 800.milliseconds
-        val DEFAULT_FALLBACK_DELAY: Duration = 10.seconds
-
-        /** Sanity bound on reset-based backoff, see `resetWait`. */
-        val DEFAULT_MAX_WAIT_DURATION: Duration = 24.hours
     }
 }

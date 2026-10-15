@@ -46,18 +46,32 @@ If a required setting is not provided by any source, the app fails to start with
 | Pool batch window | `POOL_BATCH_WINDOW` | `poolBatchWindow` | No, default `1s` | `500ms` |
 | Pool cache TTL | `POOL_CACHE_TTL` | `poolCacheTtl` | No, default `1m` | `5m` |
 | Pool max cache entries | `POOL_MAX_CACHE_ENTRIES` | `poolMaxCacheEntries` | No, default `1000` | `500` |
-| Pool reset margin | `POOL_RESET_MARGIN` | `poolResetMargin` | No, default `800ms` | `1s` |
-| Pool fallback delay | `POOL_FALLBACK_DELAY` | `poolFallbackDelay` | No, default `10s` | `30s` |
-| Pool max wait duration | `POOL_MAX_WAIT_DURATION` | `poolMaxWaitDuration` | No, default `24h` | `1h` |
+| Backoff reset margin | `BACKOFF_RESET_MARGIN` | `backoffResetMargin` | No, default `800ms` | `1s` |
+| Backoff fallback delay | `BACKOFF_FALLBACK_DELAY` | `backoffFallbackDelay` | No, default `10s` | `30s` |
+| Backoff max wait duration | `BACKOFF_MAX_WAIT_DURATION` | `backoffMaxWaitDuration` | No, default `24h` | `1h` |
+| Initial scan size | `INITIAL_SCAN_SIZE` | `initialScanSize` | No, default `40` | `20` |
+| Scan transient max retry | `SCAN_TRANSIENT_MAX_RETRY` | `scanTransientMaxRetry` | No, default `10` | `5` |
+| Scan transient retry delay | `SCAN_TRANSIENT_RETRY_DELAY` | `scanTransientRetryDelay` | No, default `10s` | `30s` |
 
-The `pool*` settings tune `StatusesPool`; their semantics (batching, caching,
-429 backoff) are documented in its KDoc in
-`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`.
+The `pool*` settings tune `StatusesPool`; their batching and caching semantics
+are documented in its KDoc in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`,
+and the `backoff*` ones tune
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/RateLimitBackoff.kt` —
+the 429 backoff policy shared by the pool's worker and the boot-up scan,
+so both honor these settings.
+The `initialScanSize` setting controls how many of the owner's latest toots
+the boot-up scan fetches and feeds into the pool, and the `scanTransient*`
+ones bound that scan's retries of transient failures (5xx and transport
+errors; 429 backoff is governed by the `backoff*` settings instead), see
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`.
 Duration values accept units like `500ms`, `1s`, `2m`, `24h`, as well as
 ISO-8601 durations like `PT24H`. An empty value is treated as unset; a
 malformed or out-of-range value fails startup with an error naming the
-setting (durations must be at least `1ms`, except `poolResetMargin` which
-allows `0s`; `poolMaxCacheEntries` must be positive).
+setting (durations must be at least `1ms`, except `backoffResetMargin` which
+allows `0s`; `poolMaxCacheEntries` must be positive; `initialScanSize` and
+`scanTransientMaxRetry` must be non-negative, where `0` disables the boot-up
+scan and transient retries respectively).
 
 Example `config.properties`:
 

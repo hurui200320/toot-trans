@@ -4,6 +4,7 @@ import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.MastoApiTestBase
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -199,7 +200,7 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
 
         val first = statuses[0]
         assertEquals("108880211901672326", first.id)
-        assertEquals("2022-08-24T22:29:46.493Z", first.createdAt)
+        assertEquals(Instant.parse("2022-08-24T22:29:46.493Z"), first.createdAt)
         assertNull(first.editedAt)
         assertNull(first.inReplyToId)
         assertNull(first.inReplyToAccountId)
@@ -216,7 +217,7 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
 
         val second = statuses[1]
         assertEquals("2222", second.id)
-        assertEquals("2026-10-15T02:00:00.000Z", second.editedAt)
+        assertEquals(Instant.parse("2026-10-15T02:00:00.000Z"), second.editedAt)
         assertEquals("1111", second.inReplyToId)
         assertEquals("103641", second.inReplyToAccountId)
         assertNull(second.language)

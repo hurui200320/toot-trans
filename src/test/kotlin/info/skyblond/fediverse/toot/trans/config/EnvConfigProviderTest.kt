@@ -31,18 +31,27 @@ class EnvConfigProviderTest {
                 "POOL_BATCH_WINDOW" to "500ms",
                 "POOL_CACHE_TTL" to "5m",
                 "POOL_MAX_CACHE_ENTRIES" to "200",
-                "POOL_RESET_MARGIN" to "1s",
-                "POOL_FALLBACK_DELAY" to "PT1M30S",
-                "POOL_MAX_WAIT_DURATION" to "2h",
             )::get
         )
 
         assertEquals(500.milliseconds, provider.poolBatchWindow)
         assertEquals(5.minutes, provider.poolCacheTtl)
         assertEquals(200, provider.poolMaxCacheEntries)
-        assertEquals(1.seconds, provider.poolResetMargin)
-        assertEquals(90.seconds, provider.poolFallbackDelay)
-        assertEquals(2.hours, provider.poolMaxWaitDuration)
+    }
+
+    @Test
+    fun `reads backoff configs from the environment`() {
+        val provider = EnvConfigProvider(
+            mapOf(
+                "BACKOFF_RESET_MARGIN" to "1s",
+                "BACKOFF_FALLBACK_DELAY" to "PT1M30S",
+                "BACKOFF_MAX_WAIT_DURATION" to "2h",
+            )::get
+        )
+
+        assertEquals(1.seconds, provider.backoffResetMargin)
+        assertEquals(90.seconds, provider.backoffFallbackDelay)
+        assertEquals(2.hours, provider.backoffMaxWaitDuration)
     }
 
     @Test
@@ -53,6 +62,10 @@ class EnvConfigProviderTest {
         assertNull(provider.accessToken)
         assertNull(provider.poolBatchWindow)
         assertNull(provider.poolMaxCacheEntries)
+        assertNull(provider.backoffFallbackDelay)
+        assertNull(provider.initialScanSize)
+        assertNull(provider.scanTransientMaxRetry)
+        assertNull(provider.scanTransientRetryDelay)
     }
 
     @Test
@@ -60,6 +73,26 @@ class EnvConfigProviderTest {
         val provider = EnvConfigProvider(mapOf("POOL_BATCH_WINDOW" to "   ")::get)
 
         assertNull(provider.poolBatchWindow)
+    }
+
+    @Test
+    fun `reads the initial scan size from the environment`() {
+        val provider = EnvConfigProvider(mapOf("INITIAL_SCAN_SIZE" to "20")::get)
+
+        assertEquals(20, provider.initialScanSize)
+    }
+
+    @Test
+    fun `reads scan transient configs from the environment`() {
+        val provider = EnvConfigProvider(
+            mapOf(
+                "SCAN_TRANSIENT_MAX_RETRY" to "5",
+                "SCAN_TRANSIENT_RETRY_DELAY" to "30s",
+            )::get
+        )
+
+        assertEquals(5, provider.scanTransientMaxRetry)
+        assertEquals(30.seconds, provider.scanTransientRetryDelay)
     }
 
     @Test
@@ -78,5 +111,32 @@ class EnvConfigProviderTest {
         val e = assertFailsWith<IllegalArgumentException> { provider.poolMaxCacheEntries }
 
         assertTrue(e.message!!.contains("POOL_MAX_CACHE_ENTRIES"))
+    }
+
+    @Test
+    fun `invalid env initial scan size fails fast naming the variable`() {
+        val provider = EnvConfigProvider(mapOf("INITIAL_SCAN_SIZE" to "many")::get)
+
+        val e = assertFailsWith<IllegalArgumentException> { provider.initialScanSize }
+
+        assertTrue(e.message!!.contains("INITIAL_SCAN_SIZE"))
+    }
+
+    @Test
+    fun `invalid env scan transient max retry fails fast naming the variable`() {
+        val provider = EnvConfigProvider(mapOf("SCAN_TRANSIENT_MAX_RETRY" to "many")::get)
+
+        val e = assertFailsWith<IllegalArgumentException> { provider.scanTransientMaxRetry }
+
+        assertTrue(e.message!!.contains("SCAN_TRANSIENT_MAX_RETRY"))
+    }
+
+    @Test
+    fun `invalid env scan transient retry delay fails fast naming the variable`() {
+        val provider = EnvConfigProvider(mapOf("SCAN_TRANSIENT_RETRY_DELAY" to "soon")::get)
+
+        val e = assertFailsWith<IllegalArgumentException> { provider.scanTransientRetryDelay }
+
+        assertTrue(e.message!!.contains("SCAN_TRANSIENT_RETRY_DELAY"))
     }
 }

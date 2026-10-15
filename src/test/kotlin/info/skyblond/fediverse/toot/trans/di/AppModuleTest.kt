@@ -5,6 +5,7 @@ import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
+import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
@@ -49,9 +50,12 @@ class AppModuleTest {
         poolBatchWindow: Duration? = null,
         poolCacheTtl: Duration? = null,
         poolMaxCacheEntries: Int? = null,
-        poolResetMargin: Duration? = null,
-        poolFallbackDelay: Duration? = null,
-        poolMaxWaitDuration: Duration? = null,
+        backoffResetMargin: Duration? = null,
+        backoffFallbackDelay: Duration? = null,
+        backoffMaxWaitDuration: Duration? = null,
+        initialScanSize: Int? = null,
+        scanTransientMaxRetry: Int? = null,
+        scanTransientRetryDelay: Duration? = null,
     ): ConfigStore = ConfigStore(
         listOf(
             object : ConfigProvider {
@@ -60,9 +64,12 @@ class AppModuleTest {
                 override val poolBatchWindow: Duration? = poolBatchWindow
                 override val poolCacheTtl: Duration? = poolCacheTtl
                 override val poolMaxCacheEntries: Int? = poolMaxCacheEntries
-                override val poolResetMargin: Duration? = poolResetMargin
-                override val poolFallbackDelay: Duration? = poolFallbackDelay
-                override val poolMaxWaitDuration: Duration? = poolMaxWaitDuration
+                override val backoffResetMargin: Duration? = backoffResetMargin
+                override val backoffFallbackDelay: Duration? = backoffFallbackDelay
+                override val backoffMaxWaitDuration: Duration? = backoffMaxWaitDuration
+                override val initialScanSize: Int? = initialScanSize
+                override val scanTransientMaxRetry: Int? = scanTransientMaxRetry
+                override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
             },
             DefaultConfigProvider(),
         )
@@ -100,6 +107,10 @@ class AppModuleTest {
 
             // The container owns the worker and waits for it during teardown.
             app.koin.get<StatusesPool>()
+
+            // the shared backoff single: resolved by the pool above and,
+            // like Main.kt does for the boot-up scan, directly too
+            app.koin.get<RateLimitBackoff>()
 
             // CredentialAccount is left out here: its resolution performs
             // network IO, so it gets the dedicated MockWebServer-backed
@@ -242,14 +253,36 @@ class AppModuleTest {
             "batchWindow" to configWith(mastoHost = testHost, accessToken = testToken, poolBatchWindow = Duration.ZERO),
             "cacheTtl" to configWith(mastoHost = testHost, accessToken = testToken, poolCacheTtl = Duration.ZERO),
             "maxCacheEntries" to configWith(mastoHost = testHost, accessToken = testToken, poolMaxCacheEntries = 0),
-            "resetMargin" to configWith(mastoHost = testHost, accessToken = testToken, poolResetMargin = (-1).seconds),
-            "fallbackDelay" to configWith(mastoHost = testHost, accessToken = testToken, poolFallbackDelay = Duration.ZERO),
-            "maxWaitDuration" to configWith(mastoHost = testHost, accessToken = testToken, poolMaxWaitDuration = Duration.ZERO),
         )
         cases.forEach { (setting, config) ->
             val app = appWith(config)
             try {
                 val error = assertFailsFast { app.koin.get<StatusesPool>() }
+                assertIs<IllegalArgumentException>(error)
+                assertTrue(error.message!!.contains(setting), "error must name $setting: ${error.message}")
+            } finally {
+                app.close()
+            }
+        }
+    }
+
+    /**
+     * Same fail-fast contract as the pool test above, but for the
+     * dedicated backoff single: resolving it directly — without the
+     * pool's help — rejects a bad value, proving the backoff* values
+     * are wired into that definition.
+     * */
+    @Test
+    fun `invalid backoff config fails backoff resolution`() {
+        val cases = mapOf(
+            "resetMargin" to configWith(backoffResetMargin = (-1).seconds),
+            "fallbackDelay" to configWith(backoffFallbackDelay = Duration.ZERO),
+            "maxWaitDuration" to configWith(backoffMaxWaitDuration = Duration.ZERO),
+        )
+        cases.forEach { (setting, config) ->
+            val app = appWith(config)
+            try {
+                val error = assertFailsFast { app.koin.get<RateLimitBackoff>() }
                 assertIs<IllegalArgumentException>(error)
                 assertTrue(error.message!!.contains(setting), "error must name $setting: ${error.message}")
             } finally {
@@ -264,12 +297,16 @@ class AppModuleTest {
         file.writeText("mastoHost=https://file.example/\naccessToken=fileToken\n")
 
         val store = appConfigStore(
-            env = mapOf("MASTO_HOST" to "https://env.example/")::get,
+            env = mapOf(
+                "MASTO_HOST" to "https://env.example/",
+                "INITIAL_SCAN_SIZE" to "5",
+            )::get,
             propertiesPath = file.absolutePath,
         )
 
         // environment variables beat the properties file
         assertEquals("https://env.example/", store.mastoHost)
+        assertEquals(5, store.initialScanSize)
         // the properties file beats the built-in defaults
         assertEquals("fileToken", store.accessToken)
         // the defaults fill what nobody configured

@@ -26,14 +26,23 @@ class EnvConfigProvider(
     override val poolMaxCacheEntries: Int?
         get() = int("POOL_MAX_CACHE_ENTRIES")
 
-    override val poolResetMargin: Duration?
-        get() = duration("POOL_RESET_MARGIN")
+    override val backoffResetMargin: Duration?
+        get() = duration("BACKOFF_RESET_MARGIN")
 
-    override val poolFallbackDelay: Duration?
-        get() = duration("POOL_FALLBACK_DELAY")
+    override val backoffFallbackDelay: Duration?
+        get() = duration("BACKOFF_FALLBACK_DELAY")
 
-    override val poolMaxWaitDuration: Duration?
-        get() = duration("POOL_MAX_WAIT_DURATION")
+    override val backoffMaxWaitDuration: Duration?
+        get() = duration("BACKOFF_MAX_WAIT_DURATION")
+
+    override val initialScanSize: Int?
+        get() = int("INITIAL_SCAN_SIZE")
+
+    override val scanTransientMaxRetry: Int?
+        get() = int("SCAN_TRANSIENT_MAX_RETRY")
+
+    override val scanTransientRetryDelay: Duration?
+        get() = duration("SCAN_TRANSIENT_RETRY_DELAY")
 
     private fun duration(name: String): Duration? =
         parseDurationConfig(name, env(name))

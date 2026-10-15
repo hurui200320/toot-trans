@@ -49,14 +49,23 @@ class PropertiesConfigProvider(
     override val poolMaxCacheEntries: Int?
         get() = int("poolMaxCacheEntries")
 
-    override val poolResetMargin: Duration?
-        get() = duration("poolResetMargin")
+    override val backoffResetMargin: Duration?
+        get() = duration("backoffResetMargin")
 
-    override val poolFallbackDelay: Duration?
-        get() = duration("poolFallbackDelay")
+    override val backoffFallbackDelay: Duration?
+        get() = duration("backoffFallbackDelay")
 
-    override val poolMaxWaitDuration: Duration?
-        get() = duration("poolMaxWaitDuration")
+    override val backoffMaxWaitDuration: Duration?
+        get() = duration("backoffMaxWaitDuration")
+
+    override val initialScanSize: Int?
+        get() = int("initialScanSize")
+
+    override val scanTransientMaxRetry: Int?
+        get() = int("scanTransientMaxRetry")
+
+    override val scanTransientRetryDelay: Duration?
+        get() = duration("scanTransientRetryDelay")
 
     private fun duration(key: String): Duration? =
         parseDurationConfig(key, properties.getProperty(key))

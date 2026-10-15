@@ -5,11 +5,15 @@ import info.skyblond.fediverse.toot.trans.masto.MastoApiTestBase
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.RecordedRequest
 import org.junit.jupiter.api.BeforeEach
+import java.time.Instant
+import java.time.format.DateTimeParseException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class OkHttpStatusesClientTest : MastoApiTestBase() {
     private lateinit var client: OkHttpStatusesClient
@@ -74,7 +78,7 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
         val status = runBlocking { client.getStatus("103254962155278888") }
 
         assertEquals("103254962155278888", status.id)
-        assertEquals("2019-12-05T11:34:47.196Z", status.createdAt)
+        assertEquals(Instant.parse("2019-12-05T11:34:47.196Z"), status.createdAt)
         assertNull(status.editedAt)
         assertNull(status.inReplyToId)
         assertNull(status.inReplyToAccountId)
@@ -91,6 +95,49 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
         assertEquals("/api/v1/statuses/103254962155278888", recorded.target)
         assertEquals("Bearer test-token", recorded.headers["Authorization"])
         assertEquals("toot-trans", recorded.headers["User-Agent"])
+    }
+
+    @Test
+    fun `getStatus parses RFC3339 dates with an offset form`() {
+        // RFC3339 section 5.6 also allows +HH:MM instead of Z, and the
+        // docs promise exactly that format:
+        // https://docs.joinmastodon.org/api/datetime-format/#datetime
+        enqueueJson(
+            200,
+            """
+            {
+              "id": "108880211901672326",
+              "created_at": "2022-08-24T22:29:46.493+08:00",
+              "edited_at": "2022-08-24T23:30:00+08:00",
+              "sensitive": false,
+              "visibility": "public",
+              "media_attachments": []
+            }
+            """.trimIndent()
+        )
+
+        val status = runBlocking { client.getStatus("108880211901672326") }
+
+        assertEquals(Instant.parse("2022-08-24T14:29:46.493Z"), status.createdAt)
+        assertEquals(Instant.parse("2022-08-24T15:30:00Z"), status.editedAt)
+    }
+
+    @Test
+    fun `getStatus fails the decode on a malformed date`() {
+        // a broken date must fail fast instead of silently nulling
+        // the field, see Rfc3339InstantSerializer
+        enqueueJson(
+            200,
+            """{"id": "1", "created_at": "not-a-date", "sensitive": false, "visibility": "public", "media_attachments": []}"""
+        )
+
+        val e = runBlocking { assertFailsWith<Exception> { client.getStatus("1") } }
+
+        // unwrap the JSON decoder's wrapping down to the parse error
+        var root: Throwable = e
+        while (root.cause != null) root = root.cause!!
+        assertIs<DateTimeParseException>(root)
+        assertTrue(root.message!!.contains("not-a-date"))
     }
 
     @Test
@@ -142,7 +189,7 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
         assertEquals("103254962155278888", statuses[0].id)
         assertEquals("public", statuses[0].visibility)
         assertEquals("108880211901672326", statuses[1].id)
-        assertEquals("2022-08-24T22:29:46.493Z", statuses[1].createdAt)
+        assertEquals(Instant.parse("2022-08-24T22:29:46.493Z"), statuses[1].createdAt)
 
         val recorded = server.takeRequest()
         assertEquals("GET", recorded.method)

@@ -86,9 +86,6 @@ class PropertiesConfigProviderTest {
             poolBatchWindow=500ms
             poolCacheTtl=5m
             poolMaxCacheEntries=200
-            poolResetMargin=1s
-            poolFallbackDelay=30s
-            poolMaxWaitDuration=2h
             """.trimIndent()
         )
 
@@ -97,9 +94,24 @@ class PropertiesConfigProviderTest {
         assertEquals(500.milliseconds, provider.poolBatchWindow)
         assertEquals(5.minutes, provider.poolCacheTtl)
         assertEquals(200, provider.poolMaxCacheEntries)
-        assertEquals(1.seconds, provider.poolResetMargin)
-        assertEquals(30.seconds, provider.poolFallbackDelay)
-        assertEquals(2.hours, provider.poolMaxWaitDuration)
+    }
+
+    @Test
+    fun `reads backoff configs from the properties file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText(
+            """
+            backoffResetMargin=1s
+            backoffFallbackDelay=30s
+            backoffMaxWaitDuration=2h
+            """.trimIndent()
+        )
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertEquals(1.seconds, provider.backoffResetMargin)
+        assertEquals(30.seconds, provider.backoffFallbackDelay)
+        assertEquals(2.hours, provider.backoffMaxWaitDuration)
     }
 
     @Test
@@ -111,6 +123,58 @@ class PropertiesConfigProviderTest {
 
         assertNull(provider.poolBatchWindow)
         assertNull(provider.poolMaxCacheEntries)
+        assertNull(provider.backoffFallbackDelay)
+        assertNull(provider.initialScanSize)
+        assertNull(provider.scanTransientMaxRetry)
+        assertNull(provider.scanTransientRetryDelay)
+    }
+
+    @Test
+    fun `reads the initial scan size from the properties file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("initialScanSize=20\n")
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertEquals(20, provider.initialScanSize)
+    }
+
+    @Test
+    fun `reads scan transient configs from the properties file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText(
+            """
+            scanTransientMaxRetry=5
+            scanTransientRetryDelay=30s
+            """.trimIndent()
+        )
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertEquals(5, provider.scanTransientMaxRetry)
+        assertEquals(30.seconds, provider.scanTransientRetryDelay)
+    }
+
+    @Test
+    fun `invalid initial scan size fails fast naming the key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("initialScanSize=many\n")
+        val provider = PropertiesConfigProvider(file)
+
+        val e = assertFailsWith<IllegalArgumentException> { provider.initialScanSize }
+
+        assertTrue(e.message!!.contains("initialScanSize"))
+    }
+
+    @Test
+    fun `invalid scan transient retry delay fails fast naming the key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("scanTransientRetryDelay=soon\n")
+        val provider = PropertiesConfigProvider(file)
+
+        val e = assertFailsWith<IllegalArgumentException> { provider.scanTransientRetryDelay }
+
+        assertTrue(e.message!!.contains("scanTransientRetryDelay"))
     }
 
     @Test

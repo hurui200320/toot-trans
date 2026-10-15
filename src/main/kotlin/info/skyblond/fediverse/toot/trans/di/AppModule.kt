@@ -4,14 +4,15 @@ import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.EnvConfigProvider
 import info.skyblond.fediverse.toot.trans.config.file.PropertiesConfigProvider
+import info.skyblond.fediverse.toot.trans.logger
 import info.skyblond.fediverse.toot.trans.masto.MastoApiClient
+import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
-import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,8 +24,6 @@ import org.koin.core.module.dsl.onClose
 import org.koin.core.module.dsl.withOptions
 import org.koin.dsl.module
 import java.io.File
-
-private val logger = KotlinLogging.logger("DI")
 
 /**
  * The Koin container's module: the whole application object graph.
@@ -63,9 +62,20 @@ fun appModule(config: ConfigStore): Module = module {
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
     } withOptions { onClose { it?.cancel() } }
 
+    // the 429 backoff policy shared by the pool's worker and the
+    // boot-up scan; the backoff* settings and their semantics are
+    // documented on [RateLimitBackoff]
+    single<RateLimitBackoff> {
+        RateLimitBackoff(
+            resetMargin = config.backoffResetMargin,
+            fallbackDelay = config.backoffFallbackDelay,
+            maxWaitDuration = config.backoffMaxWaitDuration,
+        )
+    }
+
     // the pool* settings and their semantics are documented on
-    // [StatusesPool]; like the scope above, the pool is closed by its
-    // onClose callback when the container stops; see [StatusesPool.close]
+    // [StatusesPool]; like the scope above, the pool is closed by
+    // its onClose callback when the container stops; see [StatusesPool.close]
     // for the blocking teardown contract.
     single<StatusesPool> {
         StatusesPool(
@@ -74,9 +84,7 @@ fun appModule(config: ConfigStore): Module = module {
             batchWindow = config.poolBatchWindow,
             cacheTtl = config.poolCacheTtl,
             maxCacheEntries = config.poolMaxCacheEntries,
-            resetMargin = config.poolResetMargin,
-            fallbackDelay = config.poolFallbackDelay,
-            maxWaitDuration = config.poolMaxWaitDuration,
+            rateLimitBackoff = get(),
         )
     } withOptions { onClose { it?.close() } }
 
@@ -90,7 +98,8 @@ fun appModule(config: ConfigStore): Module = module {
         runBlocking(Dispatchers.IO) {
             accountsClient.verifyCredentials()
         }.also {
-            info.skyblond.fediverse.toot.trans.di.logger.info {
+            // koin has built-in logger, not the one we want
+            info.skyblond.fediverse.toot.trans.logger.info {
                 "Logged in as ${it.username}, user id: ${it.id}"
             }
         }

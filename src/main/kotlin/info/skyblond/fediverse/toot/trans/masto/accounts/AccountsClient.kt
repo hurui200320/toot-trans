@@ -19,10 +19,14 @@ interface AccountsClient {
      * */
     suspend fun getStatuses(
         accountId: String,
-        limit: Int,
+        limit: Int = GET_STATUSES_LIMIT,
         sinceId: String? = null,
         minId: String? = null,
         maxId: String? = null,
         excludeReblogs: Boolean = false,
     ): List<Status>
+
+    companion object {
+        const val GET_STATUSES_LIMIT = 40
+    }
 }

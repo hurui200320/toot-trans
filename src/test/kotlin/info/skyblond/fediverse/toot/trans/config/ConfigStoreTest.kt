@@ -1,6 +1,10 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
+import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
+import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
+import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,18 +20,24 @@ class ConfigStoreTest {
         poolBatchWindow: Duration? = null,
         poolCacheTtl: Duration? = null,
         poolMaxCacheEntries: Int? = null,
-        poolResetMargin: Duration? = null,
-        poolFallbackDelay: Duration? = null,
-        poolMaxWaitDuration: Duration? = null,
+        backoffResetMargin: Duration? = null,
+        backoffFallbackDelay: Duration? = null,
+        backoffMaxWaitDuration: Duration? = null,
+        initialScanSize: Int? = null,
+        scanTransientMaxRetry: Int? = null,
+        scanTransientRetryDelay: Duration? = null,
     ): ConfigProvider = object : ConfigProvider {
         override val mastoHost: String? = mastoHost
         override val accessToken: String? = accessToken
         override val poolBatchWindow: Duration? = poolBatchWindow
         override val poolCacheTtl: Duration? = poolCacheTtl
         override val poolMaxCacheEntries: Int? = poolMaxCacheEntries
-        override val poolResetMargin: Duration? = poolResetMargin
-        override val poolFallbackDelay: Duration? = poolFallbackDelay
-        override val poolMaxWaitDuration: Duration? = poolMaxWaitDuration
+        override val backoffResetMargin: Duration? = backoffResetMargin
+        override val backoffFallbackDelay: Duration? = backoffFallbackDelay
+        override val backoffMaxWaitDuration: Duration? = backoffMaxWaitDuration
+        override val initialScanSize: Int? = initialScanSize
+        override val scanTransientMaxRetry: Int? = scanTransientMaxRetry
+        override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
     }
 
     @Test
@@ -128,8 +138,112 @@ class ConfigStoreTest {
     fun `throws when no provider supplies a pool config`() {
         val store = ConfigStore(listOf(provider()))
 
-        val exception = assertFailsWith<MissingConfigException> { store.poolFallbackDelay }
-        assertTrue(exception.message!!.contains("pool fallback delay"))
+        val exception = assertFailsWith<MissingConfigException> { store.poolBatchWindow }
+        assertTrue(exception.message!!.contains("pool batch window"))
+    }
+
+    @Test
+    fun `throws when no provider supplies a backoff config`() {
+        val store = ConfigStore(listOf(provider()))
+
+        val exception = assertFailsWith<MissingConfigException> { store.backoffFallbackDelay }
+        assertTrue(exception.message!!.contains("backoff fallback delay"))
+    }
+
+    @Test
+    fun `initial scan size follows the first non-null provider`() {
+        val store = ConfigStore(
+            listOf(
+                provider(initialScanSize = 40),
+                provider(initialScanSize = 80),
+            )
+        )
+
+        assertEquals(40, store.initialScanSize)
+    }
+
+    @Test
+    fun `initial scan size skips nulls and falls back to later providers`() {
+        val store = ConfigStore(
+            listOf(
+                // nothing configured
+                provider(),
+                provider(initialScanSize = 80),
+            )
+        )
+
+        assertEquals(80, store.initialScanSize)
+    }
+
+    @Test
+    fun `malformed initial scan size in an earlier provider fails fast instead of falling through`() {
+        val store = ConfigStore(
+            listOf(
+                // simulates a malformed env var, e.g. INITIAL_SCAN_SIZE=many
+                EnvConfigProvider(mapOf("INITIAL_SCAN_SIZE" to "many")::get),
+                provider(initialScanSize = 40),
+            )
+        )
+
+        val exception = assertFailsWith<IllegalArgumentException> { store.initialScanSize }
+        assertTrue(exception.message!!.contains("INITIAL_SCAN_SIZE"))
+    }
+
+    @Test
+    fun `throws when no provider supplies the initial scan size`() {
+        val store = ConfigStore(listOf(provider()))
+
+        val exception = assertFailsWith<MissingConfigException> { store.initialScanSize }
+        assertTrue(exception.message!!.contains("initial scan size"))
+    }
+
+    @Test
+    fun `scan transient configs follow the first non-null provider`() {
+        val store = ConfigStore(
+            listOf(
+                provider(scanTransientMaxRetry = 5, scanTransientRetryDelay = 30.seconds),
+                provider(scanTransientMaxRetry = 9, scanTransientRetryDelay = 40.seconds),
+            )
+        )
+
+        assertEquals(5, store.scanTransientMaxRetry)
+        assertEquals(30.seconds, store.scanTransientRetryDelay)
+    }
+
+    @Test
+    fun `scan transient configs skip nulls and fall back to later providers`() {
+        val store = ConfigStore(
+            listOf(
+                // nothing configured
+                provider(),
+                provider(scanTransientRetryDelay = 30.seconds),
+                provider(scanTransientRetryDelay = 40.seconds),
+            )
+        )
+
+        assertEquals(30.seconds, store.scanTransientRetryDelay)
+    }
+
+    @Test
+    fun `malformed scan transient config in an earlier provider fails fast instead of falling through`() {
+        val store = ConfigStore(
+            listOf(
+                // simulates a malformed env var, e.g. SCAN_TRANSIENT_RETRY_DELAY=soon
+                EnvConfigProvider(mapOf("SCAN_TRANSIENT_RETRY_DELAY" to "soon")::get),
+                provider(scanTransientRetryDelay = 30.seconds),
+            )
+        )
+
+        val exception = assertFailsWith<IllegalArgumentException> { store.scanTransientRetryDelay }
+        assertTrue(exception.message!!.contains("SCAN_TRANSIENT_RETRY_DELAY"))
+    }
+
+    @Test
+    fun `throws when no provider supplies a scan transient config`() {
+        val store = ConfigStore(listOf(provider()))
+
+        val exception = assertFailsWith<MissingConfigException> { store.scanTransientMaxRetry }
+        assertTrue(exception.message!!.contains("scan transient max retry"))
     }
 
     @Test
@@ -144,8 +258,44 @@ class ConfigStoreTest {
         assertEquals(StatusesPool.DEFAULT_BATCH_WINDOW, store.poolBatchWindow)
         assertEquals(StatusesPool.DEFAULT_CACHE_TTL, store.poolCacheTtl)
         assertEquals(StatusesPool.DEFAULT_MAX_CACHE_ENTRIES, store.poolMaxCacheEntries)
-        assertEquals(StatusesPool.DEFAULT_RESET_MARGIN, store.poolResetMargin)
-        assertEquals(StatusesPool.DEFAULT_FALLBACK_DELAY, store.poolFallbackDelay)
-        assertEquals(StatusesPool.DEFAULT_MAX_WAIT_DURATION, store.poolMaxWaitDuration)
+    }
+
+    @Test
+    fun `built-in defaults fill unconfigured backoff configs`() {
+        val store = ConfigStore(
+            listOf(
+                provider(),
+                DefaultConfigProvider()
+            )
+        )
+
+        assertEquals(RateLimitBackoff.DEFAULT_RESET_MARGIN, store.backoffResetMargin)
+        assertEquals(RateLimitBackoff.DEFAULT_FALLBACK_DELAY, store.backoffFallbackDelay)
+        assertEquals(RateLimitBackoff.DEFAULT_MAX_WAIT_DURATION, store.backoffMaxWaitDuration)
+    }
+
+    @Test
+    fun `built-in default for the initial scan size is one default page`() {
+        val store = ConfigStore(
+            listOf(
+                provider(),
+                DefaultConfigProvider()
+            )
+        )
+
+        assertEquals(AccountsClient.GET_STATUSES_LIMIT, store.initialScanSize)
+    }
+
+    @Test
+    fun `built-in defaults fill unconfigured scan transient configs`() {
+        val store = ConfigStore(
+            listOf(
+                provider(),
+                DefaultConfigProvider()
+            )
+        )
+
+        assertEquals(DEFAULT_TRANSIENT_MAX_RETRY, store.scanTransientMaxRetry)
+        assertEquals(DEFAULT_TRANSIENT_RETRY_DELAY, store.scanTransientRetryDelay)
     }
 }

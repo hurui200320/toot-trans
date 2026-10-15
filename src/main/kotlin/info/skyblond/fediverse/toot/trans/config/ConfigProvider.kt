@@ -1,5 +1,6 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import kotlin.time.Duration
 
@@ -36,17 +37,38 @@ interface ConfigProvider {
     val poolMaxCacheEntries: Int?
 
     /**
-     * Extra wait after a 429 reset before the [StatusesPool] resumes, see its KDoc.
+     * Extra wait after a 429 reset, see [RateLimitBackoff].
      * */
-    val poolResetMargin: Duration?
+    val backoffResetMargin: Duration?
 
     /**
-     * [StatusesPool] backoff when a 429 reset header is unusable, see its KDoc.
+     * Fixed backoff when a 429 reset header is unusable, see [RateLimitBackoff].
      * */
-    val poolFallbackDelay: Duration?
+    val backoffFallbackDelay: Duration?
 
     /**
-     * Sanity bound on [StatusesPool] reset-based backoff, see its KDoc.
+     * Sanity bound on reset-based backoff, see [RateLimitBackoff].
      * */
-    val poolMaxWaitDuration: Duration?
+    val backoffMaxWaitDuration: Duration?
+
+    /**
+     * Amount of the owner's latest toots the boot-up scan fetches;
+     * 0 disables the scan. The scan semantics live with the scan
+     * itself: see `performInitialScan` in `Scan.kt`.
+     * */
+    val initialScanSize: Int?
+
+    /**
+     * Retry budget per page for transient failures (5xx, transport)
+     * during the boot-up scan; 0 disables such retries. The retry
+     * policy lives with the scan itself: see `performInitialScan`
+     * in `Scan.kt`.
+     * */
+    val scanTransientMaxRetry: Int?
+
+    /**
+     * Spacing between the boot-up scan's transient retries, see
+     * `performInitialScan` in `Scan.kt`.
+     * */
+    val scanTransientRetryDelay: Duration?
 }

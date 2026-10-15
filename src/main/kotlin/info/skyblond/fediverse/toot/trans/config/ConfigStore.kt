@@ -34,14 +34,23 @@ class ConfigStore(
     override val poolMaxCacheEntries: Int
         get() = getOrThrow("pool max cache entries") { it.poolMaxCacheEntries }
 
-    override val poolResetMargin: Duration
-        get() = getOrThrow("pool reset margin") { it.poolResetMargin }
+    override val backoffResetMargin: Duration
+        get() = getOrThrow("backoff reset margin") { it.backoffResetMargin }
 
-    override val poolFallbackDelay: Duration
-        get() = getOrThrow("pool fallback delay") { it.poolFallbackDelay }
+    override val backoffFallbackDelay: Duration
+        get() = getOrThrow("backoff fallback delay") { it.backoffFallbackDelay }
 
-    override val poolMaxWaitDuration: Duration
-        get() = getOrThrow("pool max wait duration") { it.poolMaxWaitDuration }
+    override val backoffMaxWaitDuration: Duration
+        get() = getOrThrow("backoff max wait duration") { it.backoffMaxWaitDuration }
+
+    override val initialScanSize: Int
+        get() = getOrThrow("initial scan size") { it.initialScanSize }
+
+    override val scanTransientMaxRetry: Int
+        get() = getOrThrow("scan transient max retry") { it.scanTransientMaxRetry }
+
+    override val scanTransientRetryDelay: Duration
+        get() = getOrThrow("scan transient retry delay") { it.scanTransientRetryDelay }
 
     private fun <T> getOrThrow(
         name: String,

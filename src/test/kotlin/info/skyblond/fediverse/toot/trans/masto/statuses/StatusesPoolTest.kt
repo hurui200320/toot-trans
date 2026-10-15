@@ -1,6 +1,7 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
+import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -59,17 +61,31 @@ class StatusesPoolTest {
             override fun instant(): Instant = epoch.plusMillis(scope.testScheduler.currentTime)
         }
 
+        /**
+         * The backoff the pool's 429 handling runs on, over the virtual
+         * clock; settings default to the built-in ones so tests can
+         * override just what they pin.
+         * */
+        fun backoff(
+            fallbackDelay: Duration = RateLimitBackoff.DEFAULT_FALLBACK_DELAY,
+            maxWaitDuration: Duration = RateLimitBackoff.DEFAULT_MAX_WAIT_DURATION,
+        ) = RateLimitBackoff(
+            fallbackDelay = fallbackDelay,
+            maxWaitDuration = maxWaitDuration,
+            clock = clock,
+        )
+
         fun pool(maxCacheEntries: Int = 1_000) = StatusesPool(
             client, scope.backgroundScope,
             maxCacheEntries = maxCacheEntries,
-            clock = clock,
+            rateLimitBackoff = backoff(),
             timeSource = scope.testScheduler.timeSource,
         )
     }
 
     companion object {
         private fun status(id: String, content: String = id) = Status(
-            id = id, createdAt = "2026-10-15T00:00:00Z", content = content,
+            id = id, createdAt = Instant.parse("2026-10-15T00:00:00Z"), content = content,
             visibility = "public", sensitive = false, mediaAttachments = emptyList(),
         )
     }
@@ -280,8 +296,9 @@ class StatusesPoolTest {
                 ids.map { status(it) }
             }
             val pool = StatusesPool(
-                f.client, backgroundScope, clock = f.clock, timeSource = testScheduler.timeSource,
-                fallbackDelay = 2.seconds,
+                f.client, backgroundScope,
+                rateLimitBackoff = f.backoff(fallbackDelay = 2.seconds),
+                timeSource = testScheduler.timeSource,
             )
             val start = testScheduler.currentTime
             val result = async { pool.getStatus("1") }
@@ -337,9 +354,7 @@ class StatusesPoolTest {
         }
         val pool = StatusesPool(
             f.client, backgroundScope,
-            fallbackDelay = 2.seconds,
-            maxWaitDuration = 5.minutes,
-            clock = f.clock,
+            rateLimitBackoff = f.backoff(fallbackDelay = 2.seconds, maxWaitDuration = 5.minutes),
             timeSource = testScheduler.timeSource,
         )
         val result = async { pool.getStatus("1") }
@@ -477,7 +492,7 @@ class StatusesPoolTest {
         val parent = Job()
         val pool = StatusesPool(
             f.client, CoroutineScope(parent + Dispatchers.Default),
-            clock = f.clock, timeSource = testScheduler.timeSource,
+            rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource,
         )
         val result = async(start = CoroutineStart.UNDISPATCHED) { pool.getStatus("1") }
         try {
@@ -514,7 +529,7 @@ class StatusesPoolTest {
         }
         val parent = Job(backgroundScope.coroutineContext[Job])
         val scope = CoroutineScope(backgroundScope.coroutineContext + parent)
-        val pool = StatusesPool(f.client, scope, clock = f.clock, timeSource = testScheduler.timeSource)
+        val pool = StatusesPool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
         val result = async { pool.getStatus("1") }
         runCurrent()
         advanceTimeBy(1_000)
@@ -577,15 +592,15 @@ class StatusesPoolTest {
         }
         assertTrue(cacheTtl.message!!.contains("cacheTtl"))
         val resetMargin = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, resetMargin = (-1).milliseconds)
+            StatusesPool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(resetMargin = (-1).milliseconds))
         }
         assertTrue(resetMargin.message!!.contains("resetMargin"))
         val fallbackDelay = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, fallbackDelay = 0.milliseconds)
+            StatusesPool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(fallbackDelay = 0.milliseconds))
         }
         assertTrue(fallbackDelay.message!!.contains("fallbackDelay"))
         val maxWaitDuration = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, maxWaitDuration = 0.seconds)
+            StatusesPool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(maxWaitDuration = 0.seconds))
         }
         assertTrue(maxWaitDuration.message!!.contains("maxWaitDuration"))
         val maxCacheEntries = assertFailsWith<IllegalArgumentException> {
@@ -618,7 +633,7 @@ class StatusesPoolTest {
         val f = Fixture(this)
         val parent = Job(backgroundScope.coroutineContext[Job])
         val scope = CoroutineScope(backgroundScope.coroutineContext + parent)
-        val pool = StatusesPool(f.client, scope, clock = f.clock, timeSource = testScheduler.timeSource)
+        val pool = StatusesPool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
         val result = async { pool.getStatus("1") }
         runCurrent()
         parent.cancel()
@@ -633,7 +648,7 @@ class StatusesPoolTest {
         val f = Fixture(this)
         val parent = Job(backgroundScope.coroutineContext[Job])
         val scope = CoroutineScope(backgroundScope.coroutineContext + parent)
-        val pool = StatusesPool(f.client, scope, clock = f.clock, timeSource = testScheduler.timeSource)
+        val pool = StatusesPool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
         val result = async(start = CoroutineStart.UNDISPATCHED) { pool.getStatus("1") }
         try {
             assertFalse(result.isCompleted)

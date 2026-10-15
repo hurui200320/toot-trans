@@ -13,16 +13,16 @@ import kotlin.time.Duration.Companion.seconds
 class ConfigValueParsingTest {
     @Test
     fun `parses durations with units`() {
-        assertEquals(500.milliseconds, parseDurationConfig("poolResetMargin", "500ms"))
+        assertEquals(500.milliseconds, parseDurationConfig("backoffResetMargin", "500ms"))
         assertEquals(1.seconds, parseDurationConfig("poolBatchWindow", "1s"))
         assertEquals(2.minutes, parseDurationConfig("poolCacheTtl", "2m"))
-        assertEquals(24.hours, parseDurationConfig("poolMaxWaitDuration", "24h"))
+        assertEquals(24.hours, parseDurationConfig("backoffMaxWaitDuration", "24h"))
     }
 
     @Test
     fun `parses compound and ISO-8601 durations`() {
-        assertEquals(90.seconds, parseDurationConfig("poolFallbackDelay", "1m 30s"))
-        assertEquals(90.seconds, parseDurationConfig("poolFallbackDelay", "PT1M30S"))
+        assertEquals(90.seconds, parseDurationConfig("backoffFallbackDelay", "1m 30s"))
+        assertEquals(90.seconds, parseDurationConfig("backoffFallbackDelay", "PT1M30S"))
     }
 
     @Test
