@@ -15,6 +15,7 @@ import kotlinx.serialization.Serializable
 data class Status(
     val id: String,
     @SerialName("created_at") val createdAt: String,
+    val content: String? = null,
     @SerialName("edited_at") val editedAt: String? = null,
     @SerialName("in_reply_to_id") val inReplyToId: String? = null,
     @SerialName("in_reply_to_account_id") val inReplyToAccountId: String? = null,
@@ -25,6 +26,7 @@ data class Status(
     val quote: Quote? = null,
     val card: PreviewCard? = null,
     val poll: Poll? = null,
+    val reblog: Status? = null,
 )
 
 /**
