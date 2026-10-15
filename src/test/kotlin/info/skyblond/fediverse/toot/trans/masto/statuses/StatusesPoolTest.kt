@@ -527,14 +527,34 @@ class StatusesPoolTest {
         assertFailsWith<IllegalArgumentException> { pool.getStatus(" ") }
         assertFailsWith<IllegalArgumentException> { pool.invalidate("") }
         assertFailsWith<IllegalArgumentException> { pool.seed(listOf(status(""))) }
-        assertFailsWith<IllegalArgumentException> { f.pool(maxCacheEntries = 0) }
-        assertFailsWith<IllegalArgumentException> { StatusesPool(f.client, backgroundScope, batchWindow = 0.milliseconds) }
-        assertFailsWith<IllegalArgumentException> {
+        val batchWindow = assertFailsWith<IllegalArgumentException> {
+            StatusesPool(f.client, backgroundScope, batchWindow = 0.milliseconds)
+        }
+        assertTrue(batchWindow.message!!.contains("batchWindow"))
+        val requestInterval = assertFailsWith<IllegalArgumentException> {
+            StatusesPool(f.client, backgroundScope, requestInterval = 0.milliseconds)
+        }
+        assertTrue(requestInterval.message!!.contains("requestInterval"))
+        val cacheTtl = assertFailsWith<IllegalArgumentException> {
+            StatusesPool(f.client, backgroundScope, cacheTtl = 0.milliseconds)
+        }
+        assertTrue(cacheTtl.message!!.contains("cacheTtl"))
+        val resetMargin = assertFailsWith<IllegalArgumentException> {
+            StatusesPool(f.client, backgroundScope, resetMargin = (-1).milliseconds)
+        }
+        assertTrue(resetMargin.message!!.contains("resetMargin"))
+        val fallbackDelay = assertFailsWith<IllegalArgumentException> {
             StatusesPool(f.client, backgroundScope, fallbackDelay = 0.milliseconds)
         }
-        assertFailsWith<IllegalArgumentException> {
+        assertTrue(fallbackDelay.message!!.contains("fallbackDelay"))
+        val maxRetry = assertFailsWith<IllegalArgumentException> {
             StatusesPool(f.client, backgroundScope, maxRetry = 0.seconds)
         }
+        assertTrue(maxRetry.message!!.contains("maxRetry"))
+        val maxCacheEntries = assertFailsWith<IllegalArgumentException> {
+            StatusesPool(f.client, backgroundScope, maxCacheEntries = 0)
+        }
+        assertTrue(maxCacheEntries.message!!.contains("maxCacheEntries"))
         assertTrue(f.client.calls.isEmpty())
     }
 

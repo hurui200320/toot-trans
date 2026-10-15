@@ -1,6 +1,7 @@
 package info.skyblond.fediverse.toot.trans.config
 
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
+import kotlin.time.Duration
 
 
 /**
@@ -23,6 +24,27 @@ class ConfigStore(
 
     override val accessToken: String
         get() = getOrThrow("access token") { it.accessToken }
+
+    override val poolBatchWindow: Duration
+        get() = getOrThrow("pool batch window") { it.poolBatchWindow }
+
+    override val poolRequestInterval: Duration
+        get() = getOrThrow("pool request interval") { it.poolRequestInterval }
+
+    override val poolCacheTtl: Duration
+        get() = getOrThrow("pool cache TTL") { it.poolCacheTtl }
+
+    override val poolMaxCacheEntries: Int
+        get() = getOrThrow("pool max cache entries") { it.poolMaxCacheEntries }
+
+    override val poolResetMargin: Duration
+        get() = getOrThrow("pool reset margin") { it.poolResetMargin }
+
+    override val poolFallbackDelay: Duration
+        get() = getOrThrow("pool fallback delay") { it.poolFallbackDelay }
+
+    override val poolMaxRetry: Duration
+        get() = getOrThrow("pool max retry") { it.poolMaxRetry }
 
     private fun <T> getOrThrow(
         name: String,

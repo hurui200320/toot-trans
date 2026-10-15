@@ -44,7 +44,16 @@ fun main() {
     val statusesClient: StatusesClient = OkHttpStatusesClient(mastoApi)
 
     runBlocking {
-        val statusesPool = StatusesPool(statusesClient, this)
+        val statusesPool = StatusesPool(
+            statusesClient, this,
+            batchWindow = config.poolBatchWindow,
+            requestInterval = config.poolRequestInterval,
+            cacheTtl = config.poolCacheTtl,
+            maxCacheEntries = config.poolMaxCacheEntries,
+            resetMargin = config.poolResetMargin,
+            fallbackDelay = config.poolFallbackDelay,
+            maxRetry = config.poolMaxRetry,
+        )
         try {
             val userId = accountsClient.verifyCredentials().let {
                 logger.info { "Logged in as ${it.username}, user id: ${it.id}" }
@@ -66,6 +75,7 @@ fun main() {
                 }
             }
         } finally {
+            logger.info { "Statuses pool shutting down..." }
             statusesPool.shutdown()
         }
     }

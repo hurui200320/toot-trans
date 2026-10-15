@@ -55,15 +55,13 @@ import kotlin.time.TimeSource
 class StatusesPool(
     private val client: StatusesClient,
     scope: CoroutineScope,
-    private val batchWindow: Duration = 1.seconds,
-    private val requestInterval: Duration = 1.seconds,
-    private val cacheTtl: Duration = 1.minutes,
-    private val maxCacheEntries: Int = 1_000,
-    // big margin for a very inaccurate system clock
-    private val resetMargin: Duration = 800.milliseconds,
-    private val fallbackDelay: Duration = 10.seconds,
-    // sanity bound on reset-based backoff, see [resetWait]
-    private val maxRetry: Duration = 24.hours,
+    private val batchWindow: Duration = DEFAULT_BATCH_WINDOW,
+    private val requestInterval: Duration = DEFAULT_REQUEST_INTERVAL,
+    private val cacheTtl: Duration = DEFAULT_CACHE_TTL,
+    private val maxCacheEntries: Int = DEFAULT_MAX_CACHE_ENTRIES,
+    private val resetMargin: Duration = DEFAULT_RESET_MARGIN,
+    private val fallbackDelay: Duration = DEFAULT_FALLBACK_DELAY,
+    private val maxRetry: Duration = DEFAULT_MAX_RETRY,
     private val clock: Clock = Clock.systemUTC(),
     private val timeSource: TimeSource = TimeSource.Monotonic,
 ) : AutoCloseable {
@@ -96,8 +94,11 @@ class StatusesPool(
     private val wakeup = Channel<Unit>(Channel.CONFLATED)
 
     init {
-        listOf(batchWindow, requestInterval, cacheTtl, fallbackDelay, maxRetry)
-            .forEach { require(it.isFinite() && it.inWholeMilliseconds > 0) { "durations must be finite and at least 1ms" } }
+        requireValidDuration("batchWindow", batchWindow)
+        requireValidDuration("requestInterval", requestInterval)
+        requireValidDuration("cacheTtl", cacheTtl)
+        requireValidDuration("fallbackDelay", fallbackDelay)
+        requireValidDuration("maxRetry", maxRetry)
         require(resetMargin.isFinite() && resetMargin >= Duration.ZERO) { "resetMargin must be finite and non-negative" }
         require(maxCacheEntries > 0) { "maxCacheEntries must be positive" }
     }
@@ -270,5 +271,34 @@ class StatusesPool(
         // pathological timestamp cannot park the worker indefinitely.
         if (wait > java.time.Duration.ofMillis(maxRetry.inWholeMilliseconds)) return null
         return wait.seconds.seconds + (wait.nano / 1_000_000).milliseconds + resetMargin
+    }
+
+    /**
+     * Shared duration check for the `init` block; the [name] parameter
+     * makes each error name the offending setting, which surfaces in
+     * config errors (e.g. `poolBatchWindow=0s`).
+     * */
+    private fun requireValidDuration(name: String, value: Duration) {
+        require(value.isFinite() && value.inWholeMilliseconds > 0) { "$name must be finite and at least 1ms" }
+    }
+
+    companion object {
+        /**
+         * Built-in defaults for the optional constructor parameters. They are
+         * the single source of truth: the config package's default provider
+         * reuses them, so the app's deploy defaults cannot drift apart from
+         * the programmatic/test defaults.
+         * */
+        val DEFAULT_BATCH_WINDOW: Duration = 1.seconds
+        val DEFAULT_REQUEST_INTERVAL: Duration = 1.seconds
+        val DEFAULT_CACHE_TTL: Duration = 1.minutes
+        val DEFAULT_MAX_CACHE_ENTRIES: Int = 1_000
+
+        /** Big margin for a very inaccurate system clock. */
+        val DEFAULT_RESET_MARGIN: Duration = 800.milliseconds
+        val DEFAULT_FALLBACK_DELAY: Duration = 10.seconds
+
+        /** Sanity bound on reset-based backoff, see `resetWait`. */
+        val DEFAULT_MAX_RETRY: Duration = 24.hours
     }
 }

@@ -1,5 +1,8 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import kotlin.time.Duration
+
 /**
  * Provide configuration.
  *
@@ -16,4 +19,39 @@ interface ConfigProvider {
      * Your access token.
      * */
     val accessToken: String?
+
+    /**
+     * Miss collection window of the [StatusesPool], see its KDoc.
+     * */
+    val poolBatchWindow: Duration?
+
+    /**
+     * Minimum spacing between [StatusesPool] request starts, see its KDoc.
+     * */
+    val poolRequestInterval: Duration?
+
+    /**
+     * Insertion-based expiry of the [StatusesPool] cache, see its KDoc.
+     * */
+    val poolCacheTtl: Duration?
+
+    /**
+     * Entry limit of the [StatusesPool] LRU cache, see its KDoc.
+     * */
+    val poolMaxCacheEntries: Int?
+
+    /**
+     * Extra wait after a 429 reset before the [StatusesPool] resumes, see its KDoc.
+     * */
+    val poolResetMargin: Duration?
+
+    /**
+     * [StatusesPool] backoff when a 429 reset header is unusable, see its KDoc.
+     * */
+    val poolFallbackDelay: Duration?
+
+    /**
+     * Sanity bound on [StatusesPool] reset-based backoff, see its KDoc.
+     * */
+    val poolMaxRetry: Duration?
 }

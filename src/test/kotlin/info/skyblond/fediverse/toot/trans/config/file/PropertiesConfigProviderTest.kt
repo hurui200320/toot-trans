@@ -6,6 +6,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 class PropertiesConfigProviderTest {
     @Test
@@ -71,5 +76,74 @@ class PropertiesConfigProviderTest {
         file.writeText("mastoHost=https://after.example/\n")
 
         assertEquals("https://before.example/", provider.mastoHost)
+    }
+
+    @Test
+    fun `reads pool configs from the properties file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText(
+            """
+            poolBatchWindow=500ms
+            poolRequestInterval=2s
+            poolCacheTtl=5m
+            poolMaxCacheEntries=200
+            poolResetMargin=1s
+            poolFallbackDelay=30s
+            poolMaxRetry=2h
+            """.trimIndent()
+        )
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertEquals(500.milliseconds, provider.poolBatchWindow)
+        assertEquals(2.seconds, provider.poolRequestInterval)
+        assertEquals(5.minutes, provider.poolCacheTtl)
+        assertEquals(200, provider.poolMaxCacheEntries)
+        assertEquals(1.seconds, provider.poolResetMargin)
+        assertEquals(30.seconds, provider.poolFallbackDelay)
+        assertEquals(2.hours, provider.poolMaxRetry)
+    }
+
+    @Test
+    fun `returns null for pool keys missing from the file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("mastoHost=https://m.skyblond.info/\n")
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertNull(provider.poolBatchWindow)
+        assertNull(provider.poolMaxCacheEntries)
+    }
+
+    @Test
+    fun `blank pool values are treated as not configured`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("poolBatchWindow=\n")
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertNull(provider.poolBatchWindow)
+    }
+
+    @Test
+    fun `invalid pool duration fails fast naming the key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("poolBatchWindow=soon\n")
+        val provider = PropertiesConfigProvider(file)
+
+        val e = assertFailsWith<IllegalArgumentException> { provider.poolBatchWindow }
+
+        assertTrue(e.message!!.contains("poolBatchWindow"))
+    }
+
+    @Test
+    fun `invalid pool integer fails fast naming the key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("poolMaxCacheEntries=lots\n")
+        val provider = PropertiesConfigProvider(file)
+
+        val e = assertFailsWith<IllegalArgumentException> { provider.poolMaxCacheEntries }
+
+        assertTrue(e.message!!.contains("poolMaxCacheEntries"))
     }
 }
