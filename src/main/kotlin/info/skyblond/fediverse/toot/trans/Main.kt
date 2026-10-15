@@ -9,6 +9,7 @@ import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -40,22 +41,32 @@ fun main() {
     val mastoApi = MastoApiClient(mastoHost, config.accessToken, okHttp)
 
     val accountsClient: AccountsClient = OkHttpAccountsClient(mastoApi)
-    val statuesClient: StatusesClient = OkHttpStatusesClient(mastoApi)
+    val statusesClient: StatusesClient = OkHttpStatusesClient(mastoApi)
 
     runBlocking {
-        val userId = accountsClient.verifyCredentials().let {
-            logger.info { "Logged in as ${it.username}, user id: ${it.id}" }
-            it.id
-        }
-        // a boost embeds someone else's toot and carries no text of the
-        // owner's own, so there is nothing to translate; filter them
-        // out server-side instead of skipping the wrappers downstream
-        val fetch1 = accountsClient.getStatuses(userId, 40, excludeReblogs = true)
-        fetch1.forEach {
-            logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
-        }
-        accountsClient.getStatuses(userId, 40, maxId = fetch1.last().id, excludeReblogs = true).forEach {
-            logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
+        val statusesPool = StatusesPool(statusesClient, this)
+        try {
+            val userId = accountsClient.verifyCredentials().let {
+                logger.info { "Logged in as ${it.username}, user id: ${it.id}" }
+                it.id
+            }
+            // a boost embeds someone else's toot and carries no text of the
+            // owner's own, so there is nothing to translate; filter them
+            // out server-side instead of skipping the wrappers downstream
+            val fetch1 = accountsClient.getStatuses(userId, 40, excludeReblogs = true)
+            statusesPool.seed(fetch1)
+            fetch1.forEach {
+                logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
+            }
+            fetch1.lastOrNull()?.let { last ->
+                val fetch2 = accountsClient.getStatuses(userId, 40, maxId = last.id, excludeReblogs = true)
+                statusesPool.seed(fetch2)
+                fetch2.forEach {
+                    logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
+                }
+            }
+        } finally {
+            statusesPool.shutdown()
         }
     }
 }

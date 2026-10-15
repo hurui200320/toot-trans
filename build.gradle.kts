@@ -20,12 +20,15 @@ val koinVersion = "4.2.2"
 // share the same version line, so one val bumps them together
 val okhttpVersion = "5.5.0"
 
+// coroutines core and its test artifact must stay in the same version
+val coroutinesVersion = "1.11.0"
+
 dependencies {
     // logging
     implementation("ch.qos.logback:logback-classic:1.6.5")
     implementation("io.github.oshai:kotlin-logging-jvm:8.0.4")
     // coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
     // http
     implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
     implementation("com.squareup.okhttp3:okhttp-coroutines:$okhttpVersion")
@@ -36,6 +39,7 @@ dependencies {
     implementation("io.insert-koin:koin-core")
 
     testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")
     // in-memory HTTP server for the API client tests
     testImplementation("com.squareup.okhttp3:mockwebserver3:$okhttpVersion")
 }

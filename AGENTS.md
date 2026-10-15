@@ -33,6 +33,9 @@ the original toot.
 
 Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid using Mastodon in code due to copyright issues).
 
+- `masto/statuses/StatusesPool.kt`: shared cached/batched lookups, lifecycle,
+  cache bypass, and rate-limit retry semantics.
+
 ## Architecture
 
 This project is built with no-state in mind.
@@ -64,10 +67,9 @@ exhausted bucket returns HTTP 429. This project's traffic touches:
   `X-RateLimit-Remaining` / `X-RateLimit-Reset` for the bucket closest to
   exhaustion; windows are fixed wall-clock periods, not sliding.
 - Steady-state budget is tiny (one poll/min ≈ 1.6% of the token bucket).
-- `MastoApiClient.kt` parses `X-RateLimit-Reset` on 429 into
-  `MastoApiException.rateLimitReset`. No backoff/retry consumer exists
-  yet; the polling loop must wait until that timestamp instead of
-  retrying immediately.
+- `MastoApiClient.kt` exposes `X-RateLimit-Reset` on 429 in
+  `MastoApiException.rateLimitReset`; `StatusesPool.kt` consumes it for
+  pooled lookups. Other API traffic must handle its own rate limits.
 
 ## Verification commands
 

@@ -50,3 +50,28 @@ Example `config.properties`:
 mastoHost=https://mastodon.social/
 accessToken=your-access-token
 ```
+
+## Shared status lookups
+
+Use `StatusesPool` for status-by-ID reads instead of calling the HTTP client
+directly. Its KDoc in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`
+documents cache, batching, retry, and lifecycle settings.
+
+```kotlin
+val pool = StatusesPool(statusesClient, applicationScope)
+try {
+    pool.seed(statusesFromAccountPolling)
+    val parent = pool.getStatus(parentId)
+    val refreshed = pool.getStatus(parentId, bypassCache = true)
+    // After successfully deleting a status:
+    pool.invalidate(deletedId)
+} finally {
+    pool.shutdown()
+}
+```
+
+Lookups return `null` for statuses unavailable to the current token.
+Cache bypass still obeys the pool's batching and rate-limit handling.
+Account polling, status-source reads, posting, and deletion remain outside
+the pool and must handle their own rate limits.
