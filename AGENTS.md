@@ -35,6 +35,9 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 
 - `masto/statuses/StatusesPool.kt`: shared cached/batched lookups, lifecycle,
   cache bypass, and rate-limit retry semantics.
+- `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
+  chain, instance API transport, statuses pool, and the application
+  coroutine scope.
 
 ## Architecture
 
@@ -42,6 +45,10 @@ This project is built with no-state in mind.
 
 To avoid slow updates of Mastodon API libraries, this project us OkHttp
 to access API directly, parsing stuff we only need.
+
+The object graph is wired with Koin in the `di` package:
+`appModule(config)` builds it from the resolved config store, and
+`Main.kt` starts and stops the container.
 
 For LLM translation, this project accepts standard OpenAI compatible
 chat completion API settings.

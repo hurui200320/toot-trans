@@ -1,35 +1,18 @@
 package info.skyblond.fediverse.toot.trans
 
-import info.skyblond.fediverse.toot.trans.config.ConfigStore
-import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
-import info.skyblond.fediverse.toot.trans.config.EnvConfigProvider
-import info.skyblond.fediverse.toot.trans.config.file.PropertiesConfigProvider
-import info.skyblond.fediverse.toot.trans.masto.MastoApiClient
+import info.skyblond.fediverse.toot.trans.di.appConfigStore
+import info.skyblond.fediverse.toot.trans.di.appModule
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
-import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
-import java.io.File
+import org.koin.core.context.startKoin
+import org.koin.core.context.stopKoin
 
 private val logger = KotlinLogging.logger("Application")
 
 fun main() {
-    val config = ConfigStore(
-        listOf(
-            EnvConfigProvider(),
-            PropertiesConfigProvider(
-                File(
-                    System.getenv("CONFIG_PROPERTIES_PATH")
-                        ?: "./config.properties"
-                )
-            ),
-            DefaultConfigProvider()
-        )
-    )
+    val config = appConfigStore()
 
     // resolve the config outside of the logger lambda:
     // kotlin-logging swallows exceptions thrown inside the lambda,
@@ -37,23 +20,11 @@ fun main() {
     val mastoHost = config.mastoHost
     logger.info { "Instance host: $mastoHost" }
 
-    val okHttp = OkHttpClient.Builder().build()
-    val mastoApi = MastoApiClient(mastoHost, config.accessToken, okHttp)
-
-    val accountsClient: AccountsClient = OkHttpAccountsClient(mastoApi)
-    val statusesClient: StatusesClient = OkHttpStatusesClient(mastoApi)
-
-    runBlocking {
-        val statusesPool = StatusesPool(
-            statusesClient, this,
-            batchWindow = config.poolBatchWindow,
-            cacheTtl = config.poolCacheTtl,
-            maxCacheEntries = config.poolMaxCacheEntries,
-            resetMargin = config.poolResetMargin,
-            fallbackDelay = config.poolFallbackDelay,
-            maxWaitDuration = config.poolMaxWaitDuration,
-        )
-        try {
+    val koin = startKoin { modules(appModule(config)) }.koin
+    try {
+        runBlocking {
+            val accountsClient = koin.get<AccountsClient>()
+            val statusesPool = koin.get<StatusesPool>()
             val userId = accountsClient.verifyCredentials().let {
                 logger.info { "Logged in as ${it.username}, user id: ${it.id}" }
                 it.id
@@ -67,15 +38,17 @@ fun main() {
                 logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
             }
             fetch1.lastOrNull()?.let { last ->
-                val fetch2 = accountsClient.getStatuses(userId, 40, maxId = last.id, excludeReblogs = true)
+                val fetch2 =
+                    accountsClient.getStatuses(userId, 40, maxId = last.id, excludeReblogs = true)
                 statusesPool.seed(fetch2)
                 fetch2.forEach {
                     logger.info { "Status: ${it.id}, time: ${it.editedAt ?: it.createdAt}, content: ${it.content}" }
                 }
             }
-        } finally {
-            logger.info { "Statuses pool shutting down..." }
-            statusesPool.shutdown()
         }
+    } finally {
+        // releases the container and everything it holds, see the
+        // onClose callbacks in [appModule]
+        stopKoin()
     }
 }
