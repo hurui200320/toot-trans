@@ -11,6 +11,7 @@ Guidance for AI agents (and humans) working in this project.
 - [Project](#project)
 - [Repo map](#repo-map)
 - [Architecture](#architecture)
+- [Mastodon rate limits](#mastodon-rate-limits)
 - [Verification commands](#verification-commands)
 - [Code quality and style rules](#code-quality-and-style-rules)
 - [Operational rule](#operational-rule)
@@ -41,6 +42,32 @@ to access API directly, parsing stuff we only need.
 
 For LLM translation, this project accepts standard OpenAI compatible
 chat completion API settings.
+
+## Mastodon rate limits
+
+Source of truth: https://docs.joinmastodon.org/api/rate-limits/ and
+`config/initializers/rack_attack.rb` upstream. Values below are defaults;
+instances may customize them — do not hardcode them as assumptions.
+
+Limits are **shared buckets keyed by caller, not per-endpoint counters**:
+every request consumes from all buckets it matches, and the first
+exhausted bucket returns HTTP 429. This project's traffic touches:
+
+| Bucket (default) | Scope | Consumed by |
+| :--- | :--- | :--- |
+| 300 req / 5 min | per access token | every API call |
+| 1500 req / 5 min | per account | every API call (all tokens combined) |
+| 300 req / 15 min | per account, paging | any request with `since_id`/`max_id`/`min_id`/`page` (our polling) |
+| 30 req / 30 min | per account | `DELETE /statuses/:id` — cleanup of half-posted translation reply chains |
+
+- Responses (including successful ones) carry `X-RateLimit-Limit` /
+  `X-RateLimit-Remaining` / `X-RateLimit-Reset` for the bucket closest to
+  exhaustion; windows are fixed wall-clock periods, not sliding.
+- Steady-state budget is tiny (one poll/min ≈ 1.6% of the token bucket).
+- `MastoApiClient.kt` parses `X-RateLimit-Reset` on 429 into
+  `MastoApiException.rateLimitReset`. No backoff/retry consumer exists
+  yet; the polling loop must wait until that timestamp instead of
+  retrying immediately.
 
 ## Verification commands
 

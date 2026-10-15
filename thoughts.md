@@ -1,3 +1,8 @@
+> Note: This document records the idea before I start coding for this project.
+> When some features are not implemented yet, this document serves as a guideline.
+> However, as the project progresses, this document might be outdated.
+> **ALWAYS** use code as ground truth.
+
 # Mastodon 自动英文翻译回复 Bot 设计文档 (Kotlin / JVM)
 
 ## 1. 背景与设计目标
