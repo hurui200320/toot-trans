@@ -9,12 +9,13 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import java.time.Instant
+import java.util.zip.CRC32
 
 /**
  * A toot, with only the fields this project needs.
  *
- * `text` and `spoiler_text` are deliberately not parsed here: the
- * plain text for translation comes from [StatusesClient.getStatusSource].
+ * [content] is rendered HTML; [spoilerText] is the content warning.
+ * The composing text for translation comes from [StatusesClient.getStatusSource].
  *
  * See: https://docs.joinmastodon.org/entities/Status/
  * */
@@ -25,6 +26,7 @@ data class Status(
     @Serializable(with = Rfc3339InstantSerializer::class)
     @SerialName("created_at") val createdAt: Instant,
     val content: String? = null,
+    @SerialName("spoiler_text") val spoilerText: String? = null,
     @Serializable(with = Rfc3339InstantSerializer::class)
     @SerialName("edited_at") val editedAt: Instant? = null,
     @SerialName("in_reply_to_id") val inReplyToId: String? = null,
@@ -37,7 +39,20 @@ data class Status(
     val card: PreviewCard? = null,
     val poll: Poll? = null,
     val reblog: Status? = null,
-)
+) {
+    /**
+     * Checksum for reply footers: CRC32 over UTF-8 `spoilerText + "|" + content`,
+     * with null fields treated as empty, rendered as eight uppercase hex chars.
+     * Uses rendered HTML, not `/source` composing text. The basic filter only
+     * checks footer presence and does not compare this checksum.
+     */
+    fun crc32(): String {
+        val crc = CRC32()
+        val textToHash = (spoilerText ?: "") + "|" + (content ?: "")
+        crc.update(textToHash.encodeToByteArray())
+        return crc.value.toString(16).padStart(8, '0').uppercase()
+    }
+}
 
 /**
  * Media attached to a toot: only the type and the

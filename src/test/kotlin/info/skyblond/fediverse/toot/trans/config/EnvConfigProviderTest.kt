@@ -66,6 +66,7 @@ class EnvConfigProviderTest {
         assertNull(provider.initialScanSize)
         assertNull(provider.scanTransientMaxRetry)
         assertNull(provider.scanTransientRetryDelay)
+        assertNull(provider.translationCooldown)
         assertNull(provider.targetLanguage)
         assertNull(provider.targetLangCode)
     }
@@ -82,6 +83,22 @@ class EnvConfigProviderTest {
         val provider = EnvConfigProvider(mapOf("INITIAL_SCAN_SIZE" to "20")::get)
 
         assertEquals(20, provider.initialScanSize)
+    }
+
+    @Test
+    fun `reads cooldown including zero from environment`() {
+        val provider = EnvConfigProvider(mapOf("TRANSLATION_COOLDOWN" to "2m")::get)
+        assertEquals(2.minutes, provider.translationCooldown)
+        assertEquals(0.seconds, EnvConfigProvider(mapOf("TRANSLATION_COOLDOWN" to "0s")::get).translationCooldown)
+    }
+
+    @Test
+    fun `blank cooldown is unset and malformed cooldown names variable`() {
+        assertNull(EnvConfigProvider(mapOf("TRANSLATION_COOLDOWN" to " ")::get).translationCooldown)
+        val e = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("TRANSLATION_COOLDOWN" to "soon")::get).translationCooldown
+        }
+        assertTrue(e.message!!.contains("TRANSLATION_COOLDOWN"))
     }
 
     @Test

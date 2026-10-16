@@ -4,6 +4,7 @@ import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.EnvConfigProvider
 import info.skyblond.fediverse.toot.trans.config.file.PropertiesConfigProvider
+import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.logger
 import info.skyblond.fediverse.toot.trans.masto.MastoApiClient
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
@@ -87,6 +88,10 @@ fun appModule(config: ConfigStore): Module = module {
             rateLimitBackoff = get(),
         )
     } withOptions { onClose { it?.close() } }
+
+    single<TootFilter> {
+        TootFilter(get(), config.targetLangCode, config.translationCooldown)
+    }
 
     // fetched from the instance with a blocking verify_credentials call
     // at first resolution: only resolve this bean from a thread that may

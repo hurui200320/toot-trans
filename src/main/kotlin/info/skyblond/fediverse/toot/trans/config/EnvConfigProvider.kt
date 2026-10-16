@@ -44,6 +44,9 @@ class EnvConfigProvider(
     override val scanTransientRetryDelay: Duration?
         get() = duration("SCAN_TRANSIENT_RETRY_DELAY")
 
+    override val translationCooldown: Duration?
+        get() = duration("TRANSLATION_COOLDOWN")
+
     override val targetLanguage: String?
         get() = string("TARGET_LANGUAGE")
 

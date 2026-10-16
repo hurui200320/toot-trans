@@ -52,6 +52,9 @@ class ConfigStore(
     override val scanTransientRetryDelay: Duration
         get() = getOrThrow("scan transient retry delay") { it.scanTransientRetryDelay }
 
+    override val translationCooldown: Duration
+        get() = getOrThrow("translation cooldown") { it.translationCooldown }
+
     override val targetLanguage: String
         get() = getOrThrow("target language") { it.targetLanguage }
 

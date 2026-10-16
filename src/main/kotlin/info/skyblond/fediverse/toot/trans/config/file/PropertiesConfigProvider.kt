@@ -68,6 +68,9 @@ class PropertiesConfigProvider(
     override val scanTransientRetryDelay: Duration?
         get() = duration("scanTransientRetryDelay")
 
+    override val translationCooldown: Duration?
+        get() = duration("translationCooldown")
+
     override val targetLanguage: String?
         get() = string("targetLanguage")
 

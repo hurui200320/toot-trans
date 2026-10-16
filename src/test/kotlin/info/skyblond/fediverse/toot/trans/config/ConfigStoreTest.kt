@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans.config
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
+import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
@@ -28,6 +29,7 @@ class ConfigStoreTest {
         scanTransientRetryDelay: Duration? = null,
         targetLanguage: String? = null,
         targetLangCode: String? = null,
+        translationCooldown: Duration? = null,
     ): ConfigProvider = object : ConfigProvider {
         override val mastoHost: String? = mastoHost
         override val accessToken: String? = accessToken
@@ -42,6 +44,7 @@ class ConfigStoreTest {
         override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
         override val targetLanguage: String? = targetLanguage
         override val targetLangCode: String? = targetLangCode
+        override val translationCooldown: Duration? = translationCooldown
     }
 
     @Test
@@ -356,5 +359,25 @@ class ConfigStoreTest {
 
         assertEquals(DEFAULT_TRANSIENT_MAX_RETRY, store.scanTransientMaxRetry)
         assertEquals(DEFAULT_TRANSIENT_RETRY_DELAY, store.scanTransientRetryDelay)
+    }
+
+    @Test
+    fun `cooldown respects precedence null fallback and built-in default`() {
+        val store = ConfigStore(listOf(
+            provider(), provider(translationCooldown = 0.seconds), provider(translationCooldown = 10.seconds),
+        ))
+        assertEquals(0.seconds, store.translationCooldown)
+        assertEquals(TootFilter.DEFAULT_COOLDOWN, ConfigStore(listOf(provider(), DefaultConfigProvider())).translationCooldown)
+    }
+
+    @Test
+    fun `missing and malformed cooldown fail rather than falling through`() {
+        val missing = assertFailsWith<MissingConfigException> { ConfigStore(listOf(provider())).translationCooldown }
+        assertTrue(missing.message!!.contains("translation cooldown"))
+        val store = ConfigStore(listOf(
+            EnvConfigProvider(mapOf("TRANSLATION_COOLDOWN" to "soon")::get), DefaultConfigProvider(),
+        ))
+        val malformed = assertFailsWith<IllegalArgumentException> { store.translationCooldown }
+        assertTrue(malformed.message!!.contains("TRANSLATION_COOLDOWN"))
     }
 }

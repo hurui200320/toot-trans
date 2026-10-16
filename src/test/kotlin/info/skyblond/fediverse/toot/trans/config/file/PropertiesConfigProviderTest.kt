@@ -127,6 +127,7 @@ class PropertiesConfigProviderTest {
         assertNull(provider.initialScanSize)
         assertNull(provider.scanTransientMaxRetry)
         assertNull(provider.scanTransientRetryDelay)
+        assertNull(provider.translationCooldown)
     }
 
     @Test
@@ -137,6 +138,25 @@ class PropertiesConfigProviderTest {
         val provider = PropertiesConfigProvider(file)
 
         assertEquals(20, provider.initialScanSize)
+    }
+
+    @Test
+    fun `reads cooldown from properties including zero and blank`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("translationCooldown=2m\n")
+        assertEquals(2.minutes, PropertiesConfigProvider(file).translationCooldown)
+        file.writeText("translationCooldown=0s\n")
+        assertEquals(0.seconds, PropertiesConfigProvider(file).translationCooldown)
+        file.writeText("translationCooldown=   \n")
+        assertNull(PropertiesConfigProvider(file).translationCooldown)
+    }
+
+    @Test
+    fun `malformed cooldown names properties key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("translationCooldown=soon\n")
+        val e = assertFailsWith<IllegalArgumentException> { PropertiesConfigProvider(file).translationCooldown }
+        assertTrue(e.message!!.contains("translationCooldown"))
     }
 
     @Test

@@ -6,19 +6,14 @@ import org.jsoup.nodes.TextNode
 
 /**
  * The marker line this bot appends as the last line of every
- * English translation reply: `🌐{hash}#{seq}#{total}`.
+ * translation reply: `🌐{hash}#{seq}#{total}`.
  *
- * The marker makes the bot's own replies self-describing, so the
- * poller can recognize them and rebuild multi-reply chains with no
- * local state:
+ * The marker makes replies recognizable without local state:
  * - [hash]: 8 uppercase hex chars (0-9A-F) derived from the source
- *   toot's text (content and spoiler text), identifying *which
- *   version* of the original was translated — an edited original
- *   no longer matches the hash of its existing translation.
+ *   toot (see `Status.crc32()` in `masto/statuses/Models.kt`).
  * - [seq] and [total]: the 1-based index and the count of the
- *   segments the full translation was split into. A chain whose
- *   tail marker has `seq == total` is complete; a shorter one is
- *   half-posted and must be cleaned up before retranslating.
+ *   segments the full translation was split into.
+ * How the filter uses this marker is documented in `filter/TootFilter.kt`.
  *
  * Examples: a reply that fit in one post ends with `🌐A1B2C3D4#1#1`;
  * a translation split into 3 posts ends its segments with `#1#3`,

@@ -73,6 +73,12 @@ interface ConfigProvider {
     val scanTransientRetryDelay: Duration?
 
     /**
+     * Delay after creation/edit before a toot is eligible; zero disables it.
+     * See `filter/TootFilter.kt` for the eligibility and timing policy.
+     */
+    val translationCooldown: Duration?
+
+    /**
      * Target language for translation in plain text.
      * For example, "English" or "Simplified Chinese".
      * */
@@ -90,7 +96,7 @@ interface ConfigProvider {
      * posting language — the exact rules live server-side, in
      * Mastodon's `PostStatusService` and `valid_locale_or_nil` from
      * `languages_helper.rb`. Fetched statuses are matched against this
-     * config exactly (see `Main.kt`), so the value must be a tag the
+     * config exactly (see `filter/TootFilter.kt`), so the value must be a tag the
      * instance stores as-is.
      * For example, "en", "zh", "zh-CN".
      * */

@@ -2,6 +2,7 @@ package info.skyblond.fediverse.toot.trans.config
 
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
+import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
@@ -34,6 +35,8 @@ class DefaultConfigProvider : ConfigProvider {
     // apart either
     override val scanTransientMaxRetry: Int = DEFAULT_TRANSIENT_MAX_RETRY
     override val scanTransientRetryDelay: Duration = DEFAULT_TRANSIENT_RETRY_DELAY
+
+    override val translationCooldown: Duration = TootFilter.DEFAULT_COOLDOWN
 
     // required config, no default
     override val targetLanguage: String? = null

@@ -4,6 +4,7 @@ import info.skyblond.fediverse.toot.trans.config.ConfigProvider
 import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
+import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
@@ -59,6 +60,7 @@ class AppModuleTest {
         scanTransientRetryDelay: Duration? = null,
         targetLanguage: String? = null,
         targetLangCode: String? = null,
+        translationCooldown: Duration? = null,
     ): ConfigStore = ConfigStore(
         listOf(
             object : ConfigProvider {
@@ -75,6 +77,7 @@ class AppModuleTest {
                 override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
                 override val targetLanguage: String? = targetLanguage
                 override val targetLangCode: String? = targetLangCode
+                override val translationCooldown: Duration? = translationCooldown
             },
             DefaultConfigProvider(),
         )
@@ -104,7 +107,7 @@ class AppModuleTest {
 
     @Test
     fun `resolves the whole graph with a complete config`() {
-        val app = appWith(configWith(mastoHost = testHost, accessToken = testToken))
+        val app = appWith(configWith(mastoHost = testHost, accessToken = testToken, targetLangCode = "en"))
         try {
             // interface definitions point at the OkHttp implementations
             assertIs<OkHttpAccountsClient>(app.koin.get<AccountsClient>())
@@ -116,6 +119,7 @@ class AppModuleTest {
             // the shared backoff single: resolved by the pool above and,
             // like Main.kt does for the boot-up scan, directly too
             app.koin.get<RateLimitBackoff>()
+            app.koin.get<TootFilter>()
 
             // CredentialAccount is left out here: its resolution performs
             // network IO, so it gets the dedicated MockWebServer-backed
@@ -310,6 +314,7 @@ class AppModuleTest {
                 "MASTO_HOST" to "https://env.example/",
                 "INITIAL_SCAN_SIZE" to "5",
                 "TARGET_LANG_CODE" to "ja",
+                "TRANSLATION_COOLDOWN" to "0s",
             )::get,
             propertiesPath = file.absolutePath,
         )
@@ -318,6 +323,7 @@ class AppModuleTest {
         assertEquals("https://env.example/", store.mastoHost)
         assertEquals(5, store.initialScanSize)
         assertEquals("ja", store.targetLangCode)
+        assertEquals(Duration.ZERO, store.translationCooldown)
         // the properties file beats the built-in defaults
         assertEquals("fileToken", store.accessToken)
         assertEquals("English", store.targetLanguage)
@@ -341,5 +347,29 @@ class AppModuleTest {
             )
         }
         assertTrue(e.message!!.contains("target language"))
+    }
+
+    @Test
+    fun `invalid cooldown fails filter resolution and zero is accepted`() {
+        for (cooldown in listOf((-1).seconds, Duration.INFINITE)) {
+            val app = appWith(configWith(
+                mastoHost = testHost, accessToken = testToken, targetLangCode = "en", translationCooldown = cooldown,
+            ))
+            try {
+                val error = assertFailsFast { app.koin.get<TootFilter>() }
+                assertIs<IllegalArgumentException>(error)
+                assertTrue(error.message!!.contains("translationCooldown"))
+            } finally {
+                app.close()
+            }
+        }
+        val app = appWith(configWith(
+            mastoHost = testHost, accessToken = testToken, targetLangCode = "en", translationCooldown = Duration.ZERO,
+        ))
+        try {
+            assertIs<TootFilter>(app.koin.get<TootFilter>())
+        } finally {
+            app.close()
+        }
     }
 }

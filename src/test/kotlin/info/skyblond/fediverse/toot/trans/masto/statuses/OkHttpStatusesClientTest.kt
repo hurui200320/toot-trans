@@ -79,6 +79,7 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
 
         assertEquals("103254962155278888", status.id)
         assertEquals(Instant.parse("2019-12-05T11:34:47.196Z"), status.createdAt)
+        assertEquals("", status.spoilerText)
         assertNull(status.editedAt)
         assertNull(status.inReplyToId)
         assertNull(status.inReplyToAccountId)
@@ -120,6 +121,16 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
 
         assertEquals(Instant.parse("2022-08-24T14:29:46.493Z"), status.createdAt)
         assertEquals(Instant.parse("2022-08-24T15:30:00Z"), status.editedAt)
+    }
+
+    @Test
+    fun `status parses nonempty null and omitted spoiler text`() {
+        enqueueJson(200, statusJson.replace("\"spoiler_text\": \"\"", "\"spoiler_text\": \"警告\""))
+        assertEquals("警告", runBlocking { client.getStatus("1") }.spoilerText)
+        enqueueJson(200, statusJson.replace("\"spoiler_text\": \"\"", "\"spoiler_text\": null"))
+        assertNull(runBlocking { client.getStatus("1") }.spoilerText)
+        enqueueJson(200, minimalStatusJson("1"))
+        assertNull(runBlocking { client.getStatus("1") }.spoilerText)
     }
 
     @Test

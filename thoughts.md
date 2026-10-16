@@ -14,7 +14,7 @@
 ### 1.2 核心设计原则
 1. **主账号自回复（Self-reply）**：不使用独立 `@bot` 账号，直接用主号 Token 在原帖下发英文评论，确保外站关注者可通过正常 ActivityPub 联邦机制收到回复，不掉出对话上下文。
 2. **完全无状态（Stateless）**：不依赖本地数据库或状态文件。利用 Mastodon Snowflake ID 单调递增特性，每次轮询仅拉取最近 40 条推文即可在内存中完成原帖与翻译帖的配对。
-3. **冷却期替代编辑同步**：规定原帖修改均在冷却期（Cooldown，如 1~5 分钟）内完成；以 `edited_at ?: created_at` 为基准，满冷却期后再触发翻译，省去复杂的译文原地修改与分段对齐逻辑。
+3. **One shot**：Only translate toots after the cooldown (effective time `edited_at ?: created_at`). All edits after the cooldown period are ignored.
 4. **紧凑尾标与预计算分段**：译文最后一行固定附加 `🌐a1b2c3d4#x#y`（8 位 Hash + 当前段数 `x` + 总段数 `y`），一次性翻译后在内存算出总段数再依次连发。
 5. **不引入重型第三方 SDK**：直接使用 `OkHttp` + `kotlinx.serialization` 调用 3~4 个核心 REST 接口，避免第三方 SDK 因 Mastodon 新增字段导致反序列化崩溃。
 
@@ -94,7 +94,7 @@ Mastodon 的 Status ID 是按时间单调递增的 Snowflake ID，列表接口�
 2. **非对外回复**：`P.inReplyToAccountId == null || P.inReplyToAccountId == myAccountId`（只翻译原创主帖和自己的串，不打扰别人评论区）。
   + 需要构建整条回复串，需要保证每条都是回复自己的。如果1回复别人，2回复了1，这个时候不应该翻译。
 3. **包含中文且非英文帖**：`P.language != "en"` 且正文/CW 包含中文字符（`[\u4e00-\u9fff]`）。
-4. **尚未完成翻译**：
+4. **尚未完成翻译**：(pending)
     - 若 `P.id` 下已存在翻译链 `E1..Ek`，且尾节点 `Ek` 的尾标满足 `x == y`（同时 `k == y`），说明**已翻译完成**，直接跳过。
     - **异常残链自愈**：若 `P.id` 下存在翻译链，但尾节点 `x < y`（说明上次发多段回复时中途网络中断），则先按 **从末端到根部（`Ek -> ... -> E1`）的逆序** 调用 `DELETE /api/v1/statuses/{id}` 清理残链，再进入 Step 4 重新翻译。
 

@@ -14,6 +14,31 @@ For example, if you post zh-CN and want to translate into en, but all your toots
 are tagged en for some reason, then this project will ignore those toots,
 as to the code, they are already in English.
 
+## Current implementation
+
+The application currently performs one startup scan and logs pending originals.
+LLM translation, posting, and periodic polling are not implemented yet. The
+filter is read-only: it does not delete or update any old or stale translations.
+
+### Known limitations (current stage)
+
+Whether an original counts as translated is not decided by tracing its reply
+chain: any direct reply carrying a valid footer (the `🌐{hash}#{seq}#{total}`
+marker, see `llm/Footer.kt`) in the target language marks the original as
+done. The footer's hash, the segment order, and the completeness of the chain
+are not checked, and partial or stale translations are never cleaned up or
+refreshed; the policy lives in `filter/TootFilter.kt`. Accepted defects:
+
+- A half-posted chain (for example only `#1#3` of a 3-segment translation
+  went out before an interruption) suppresses its original: the missing
+  segments are never posted.
+- An original edited after its translation was posted is not re-translated
+  (one-shot policy), even though the footer's hash no longer matches the
+  current text.
+
+Recovery is manual: delete the partial or stale translation replies on the
+instance, and the next scan will treat the original as pending again.
+
 ## Access Token
 
 This project reuses the existing account so your followers don't need to follow a new account.
@@ -64,6 +89,7 @@ If a required setting is not provided by any source, the app fails to start with
 | Initial scan size | `INITIAL_SCAN_SIZE` | `initialScanSize` | No, default `40` | `20` |
 | Scan transient max retry | `SCAN_TRANSIENT_MAX_RETRY` | `scanTransientMaxRetry` | No, default `10` | `5` |
 | Scan transient retry delay | `SCAN_TRANSIENT_RETRY_DELAY` | `scanTransientRetryDelay` | No, default `10s` | `30s` |
+| Translation cooldown | `TRANSLATION_COOLDOWN` | `translationCooldown` | No, default `3m`; `0s` disables | `1m` |
 | Target language | `TARGET_LANGUAGE` | `targetLanguage` | Yes | `English` |
 | Target lang code | `TARGET_LANG_CODE` | `targetLangCode` | Yes | `en` |
 
@@ -72,7 +98,7 @@ are documented in its KDoc in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`,
 and the `backoff*` ones tune
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/RateLimitBackoff.kt` —
-the 429 backoff policy shared by the pool's worker and the boot-up scan,
+the 429 backoff policy shared by the pool's worker and boot-up scan,
 so both honor these settings.
 The `initialScanSize` setting controls how many of the owner's latest toots
 the boot-up scan fetches and feeds into the pool, and the `scanTransient*`
@@ -92,9 +118,14 @@ Duration values accept units like `500ms`, `1s`, `2m`, `24h`, as well as
 ISO-8601 durations like `PT24H`. An empty value is treated as unset; a
 malformed or out-of-range value fails startup with an error naming the
 setting (durations must be at least `1ms`, except `backoffResetMargin` which
-allows `0s`; `poolMaxCacheEntries` must be positive; `initialScanSize` and
+allows `0s` and `translationCooldown` which is finite and non-negative;
+`poolMaxCacheEntries` must be positive; `initialScanSize` and
 `scanTransientMaxRetry` must be non-negative, where `0` disables the boot-up
 scan and transient retries respectively).
+
+The cooldown policy is documented on `filter/TootFilter.kt`.
+`initialScanSize` limits the number of recent posts, not their age; there is
+no separate time cutoff.
 
 Example `config.properties`:
 
@@ -133,4 +164,6 @@ pending lookups and waits for worker cleanup; it does not drain requests.
 Lookups return `null` for statuses unavailable to the current token.
 Cache bypass still obeys the pool's batching and rate-limit handling.
 Account polling, status-source reads, posting, and deletion remain outside
-the pool and must handle their own rate limits.
+the pool. The startup scan handles its own rate limits using the shared
+backoff policy; future source/posting flows must do the same. The filter
+does not invoke deletion.
