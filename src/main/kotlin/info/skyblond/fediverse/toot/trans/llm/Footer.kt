@@ -13,7 +13,8 @@ import org.jsoup.nodes.TextNode
  *   toot (see `Status.crc32()` in `masto/statuses/Models.kt`).
  * - [seq] and [total]: the 1-based index and the count of the
  *   segments the full translation was split into.
- * How the filter uses this marker is documented in `filter/TootFilter.kt`.
+ * How the marker is used to reconstruct and classify a translation chain
+ * is documented in `masto/statuses/TranslationChain.kt`.
  *
  * Examples: a reply that fit in one post ends with `🌐A1B2C3D4#1#1`;
  * a translation split into 3 posts ends its segments with `#1#3`,

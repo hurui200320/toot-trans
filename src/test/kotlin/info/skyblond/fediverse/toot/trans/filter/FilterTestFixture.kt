@@ -1,43 +1,17 @@
 package info.skyblond.fediverse.toot.trans.filter
 
-import info.skyblond.fediverse.toot.trans.llm.Footer
-import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.statuses.CreateStatusRequest
 import info.skyblond.fediverse.toot.trans.masto.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusSource
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.now
+import info.skyblond.fediverse.toot.trans.masto.statuses.owner
 import kotlinx.coroutines.test.TestScope
 import java.time.Clock
-import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
-
-internal val owner = CredentialAccount("owner", "test-owner")
-internal val now: Instant = Instant.parse("2026-10-16T12:00:00Z")
-
-internal fun original(
-    id: String = "P",
-    parent: String? = null,
-    parentAccount: String? = if (parent == null) null else owner.id,
-): Status = Status(
-    id = id, createdAt = now.minusSeconds(600), content = "<p>中文 body $id</p>",
-    inReplyToId = parent, inReplyToAccountId = parentAccount, language = "zh",
-    visibility = "public", sensitive = false, mediaAttachments = emptyList(),
-)
-
-internal fun translation(
-    id: String,
-    parent: String = "P",
-    seq: Int = 1,
-    total: Int = 1,
-    hash: String = original().crc32(),
-    language: String = "en",
-): Status = original(id, parent).copy(
-    createdAt = now.minusSeconds(300), language = language,
-    content = "<p>Translated<br>${Footer(hash, seq, total)}</p>",
-)
 
 /** Status reads only: any write or source request fails the test. */
 internal class FilterTestFixture(scope: TestScope, statuses: List<Status>) {

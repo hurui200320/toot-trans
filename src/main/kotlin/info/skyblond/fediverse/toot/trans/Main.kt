@@ -7,6 +7,8 @@ import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
+import info.skyblond.fediverse.toot.trans.masto.statuses.findTranslationChainState
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
 import org.koin.core.context.startKoin
@@ -37,10 +39,28 @@ fun main() {
             )
 
             val pending = filter.filter(toots, account)
-            logger.info { "Pending translations: ${pending.size}" }
+            logger.info { "Eligible originals: ${pending.size}" }
             pending.forEach { toot ->
-                // TODO: LLM translation and posting.
-                logger.info { "Pending translation: id=${toot.id}, lang=${toot.language}" }
+                when (val state = findTranslationChainState(toot.id, toots, config.targetLangCode)) {
+                    is TranslationChainState.Translated -> logger.info {
+                        "Already translated: id=${toot.id}, segments=${state.chain.segments.size}"
+                    }
+
+                    is TranslationChainState.NeedsTranslation -> {
+                        if (state.obsolete.isNotEmpty()) {
+                            // TODO: delete state.obsolete leaf-first, then LLM translate and post.
+                            logger.warn {
+                                "Should delete obsolete segments: ${state.obsolete.joinToString { it.id }}"
+                            }
+                        }
+
+                        logger.info {
+                            "Pending translation: id=${toot.id}, " +
+                                    "reason=${state.reason}, obsolete=${state.obsolete.size}, " +
+                                    "cw=${toot.spoilerText}, content=${toot.content}"
+                        }
+                    }
+                }
             }
         }
     } finally {

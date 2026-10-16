@@ -1,6 +1,8 @@
 package info.skyblond.fediverse.toot.trans.filter
 
 import info.skyblond.fediverse.toot.trans.llm.Footer
+import info.skyblond.fediverse.toot.trans.masto.statuses.now
+import info.skyblond.fediverse.toot.trans.masto.statuses.original
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals

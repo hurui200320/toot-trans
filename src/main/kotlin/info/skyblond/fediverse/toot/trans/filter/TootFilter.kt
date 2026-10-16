@@ -14,19 +14,14 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.toJavaDuration
 
 /**
- * Return pending originals, oldest effective time first, from the owner's scan
- * already seeded into [pool] (see `performInitialScan` in `Scan.kt`). Exclude
- * footer posts in any language, target-language posts, and blank body/CW.
- * Boosts are not re-checked here: the scan already excludes them server-side.
- * Null language is eligible. [cooldown] uses `editedAt ?: createdAt`; zero
- * disables it, except for future timestamps. Ancestry must pass [checkReplyChain].
+ * Eligibility selection over the owner's scanned statuses: picks the
+ * originals worth translating, oldest effective time first, using the
+ * shared [pool] for ancestry lookups. Read-only.
  *
- * Any direct reply in this scan with a valid footer and [targetLangCode] means
- * translation has already started: skip the original without checking hashes,
- * segment order, or completeness. No cleanup or refresh is performed. The
- * accepted limitations and manual recovery procedure are documented in
- * README's "Known limitations (current stage)" section.
- * API/transport failures and cancellation propagate.
+ * Eligibility only: whether an eligible original already has a translation
+ * chain, and which segments to delete before retranslating it, is decided
+ * from the same scan by `findTranslationChainState` in
+ * `masto/statuses/TranslationChain.kt`.
  */
 class TootFilter(
     private val pool: StatusesPool,
@@ -41,19 +36,19 @@ class TootFilter(
         }
     }
 
-    // input is a list of fetched statuses, mixed with original toots and translated toots
-    // no reblog
+    /**
+     * Return the eligible originals from [statuses], oldest effective time
+     * first. [statuses] is the owner's scan as `performInitialScan` in
+     * `Scan.kt` fetched it (already seeded into the pool): a mix of
+     * originals and translated toots, without boosts.
+     *
+     * Exclude footer posts in any language, target-language posts, and
+     * blank body/CW. Null language is eligible. The cooldown uses
+     * `editedAt ?: createdAt`; zero disables it, except for future
+     * timestamps. Ancestry must pass [checkReplyChain] against [account].
+     * API/transport failures and cancellation propagate.
+     * */
     suspend fun filter(statuses: List<Status>, account: CredentialAccount): List<Status> {
-        // has footer
-        val tootWithFooterIds = statuses.asSequence()
-            .filter { it.content?.matchFooterFromContent() != null }
-            .map { it.id }.toSet()
-        // toot ids that has been replied by translated toots
-        // mix of original toots and parent translated toots
-        val translatedReplyToIds = statuses.asSequence()
-            .filter { it.id in tootWithFooterIds && it.language == targetLangCode }
-            .mapNotNull { it.inReplyToId }.toSet()
-
         val now = clock.instant()
         val wait = cooldown.toJavaDuration()
         val pending = mutableListOf<Status>()
@@ -61,10 +56,10 @@ class TootFilter(
             currentCoroutineContext().ensureActive()
             // too new
             if (java.time.Duration.between(status.editedAt ?: status.createdAt, now) < wait) continue
-            // has footer or already in target lang
-            if (status.id in tootWithFooterIds || status.language == targetLangCode) continue
-            // has been translated, either fully or partially
-            if (status.id in translatedReplyToIds) continue
+            // already in target lang
+            if (status.language == targetLangCode) continue
+            // has footer
+            if (status.content?.matchFooterFromContent() != null) continue
             // body and content warning is all blank
             val body = Jsoup.parseBodyFragment(status.content.orEmpty()).body().text()
             if (body.isBlank() && status.spoilerText.isNullOrBlank()) continue

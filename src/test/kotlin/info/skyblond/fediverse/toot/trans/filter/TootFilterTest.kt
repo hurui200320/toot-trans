@@ -1,6 +1,9 @@
 package info.skyblond.fediverse.toot.trans.filter
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
+import info.skyblond.fediverse.toot.trans.masto.statuses.now
+import info.skyblond.fediverse.toot.trans.masto.statuses.original
+import info.skyblond.fediverse.toot.trans.masto.statuses.translation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import java.io.IOException
@@ -50,7 +53,7 @@ class TootFilterTest {
     }
 
     @Test
-    fun `pending originals are sorted by effective time oldest first`() = runTest {
+    fun `eligible originals are sorted by effective time oldest first`() = runTest {
         val statuses = listOf(
             original("edited").copy(editedAt = now.minusSeconds(200)),
             original("old").copy(createdAt = now.minusSeconds(700)),
@@ -60,47 +63,48 @@ class TootFilterTest {
     }
 
     @Test
-    fun `any marked target-language direct reply skips original regardless of completeness or hash`() = runTest {
+    fun `footer replies never suppress the original because translation state is out of scope`() = runTest {
         for (reply in listOf(
             translation("single"), translation("partial", total = 3),
             translation("stale", hash = "AAAAAAAA"), translation("out-of-order", seq = 2, total = 3),
         )) {
             val statuses = listOf(original(), reply)
             val f = FilterTestFixture(this, statuses)
-            assertTrue(f.filter().isEmpty(), reply.id)
+            assertEquals(listOf("P"), f.filter().map { it.id }, reply.id)
             assertEquals(statuses.associateBy { it.id }, f.remote)
             assertTrue(f.lookups.isEmpty())
         }
     }
 
     @Test
-    fun `duplicate or forked translations just skip without graph reconstruction`() = runTest {
+    fun `duplicate or forked translations leave the original eligible`() = runTest {
         val statuses = listOf(
             original(), translation("T1", total = 2), translation("T2", "T1", 2, 2),
             translation("fork", "T1", 2, 2), translation("duplicate"),
         )
         val f = FilterTestFixture(this, statuses)
-        assertTrue(f.filter().isEmpty())
+        assertEquals(listOf("P"), f.filter().map { it.id })
         assertEquals(statuses.associateBy { it.id }, f.remote)
         assertTrue(f.lookups.isEmpty())
     }
 
     @Test
-    fun `edits after translation do not trigger a replacement`() = runTest {
+    fun `edits after translation do not change filter eligibility`() = runTest {
         for (edited in listOf(original().copy(content = "<p>edited</p>"), original().copy(spoilerText = "CW"))) {
             val statuses = listOf(edited, translation("T"))
             val f = FilterTestFixture(this, statuses)
-            assertTrue(f.filter().isEmpty())
+            assertEquals(listOf("P"), f.filter().map { it.id })
             assertEquals(statuses.associateBy { it.id }, f.remote)
+            assertTrue(f.lookups.isEmpty())
         }
     }
 
     @Test
-    fun `other-language marked reply and ordinary target-language reply do not suppress original`() = runTest {
+    fun `other-language and target-language replies leave the original eligible`() = runTest {
         val p = original()
         val replies = listOf(
-            translation("ja", language = "ja"), original("comment", "P").copy(language = "en"),
-            translation("invalid-footer").copy(content = "<p>Hello<br>🌐AAAAAAAA#0#1</p>"),
+            translation("ja", language = "ja"),
+            original("comment", "P").copy(language = "en"),
         )
         for (reply in replies) {
             val f = FilterTestFixture(this, listOf(p, reply))
@@ -110,11 +114,23 @@ class TootFilterTest {
     }
 
     @Test
-    fun `translation for another original does not suppress pending original`() = runTest {
+    fun `malformed footer text is an ordinary reply and stays eligible`() = runTest {
+        val p = original()
+        val reply = translation("invalid-footer").copy(
+            content = "<p>Hello<br>🌐AAAAAAAA#0#1</p>",
+            language = "zh",
+        )
+        val f = FilterTestFixture(this, listOf(p, reply))
+        assertEquals(listOf(p, reply), f.filter())
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `a translation for another original leaves both originals eligible`() = runTest {
         val p = original()
         val q = original("Q")
         val f = FilterTestFixture(this, listOf(p, q, translation("T", parent = "Q")))
-        assertEquals(listOf(p), f.filter())
+        assertEquals(listOf(p, q), f.filter())
     }
 
     @Test
@@ -132,12 +148,12 @@ class TootFilterTest {
     }
 
     @Test
-    fun `existing translation skips without even fetching ancestry`() = runTest {
+    fun `footer replies do not shortcut the ancestry check`() = runTest {
         val p = original(parent = "not-in-scan")
         val f = FilterTestFixture(this, listOf(p, translation("T", total = 3)))
-        f.fetch = { error("No lookup needed for already translated originals") }
+        // the missing ancestor fails checkReplyChain, so the original is not eligible
         assertTrue(f.filter().isEmpty())
-        assertTrue(f.lookups.isEmpty())
+        assertEquals(listOf(setOf("not-in-scan")), f.lookups)
     }
 
     @Test
@@ -156,7 +172,7 @@ class TootFilterTest {
     }
 
     @Test
-    fun `empty scan returns no pending originals`() = runTest {
+    fun `empty scan returns no eligible originals`() = runTest {
         val f = FilterTestFixture(this, emptyList())
         assertTrue(f.filter().isEmpty())
         assertTrue(f.lookups.isEmpty())

@@ -1,7 +1,7 @@
-package info.skyblond.fediverse.toot.trans.filter
+package info.skyblond.fediverse.toot.trans.masto.statuses
 
+import info.skyblond.fediverse.toot.trans.filter.FilterTestFixture
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
-import info.skyblond.fediverse.toot.trans.masto.statuses.checkReplyChain
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import java.io.IOException

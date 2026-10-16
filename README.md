@@ -16,28 +16,40 @@ as to the code, they are already in English.
 
 ## Current implementation
 
-The application currently performs one startup scan and logs pending originals.
-LLM translation, posting, and periodic polling are not implemented yet. The
-filter is read-only: it does not delete or update any old or stale translations.
+The application currently performs one startup scan, selects eligible
+originals, and reconstructs each original's existing translation chain from
+the scanned statuses (see `masto/statuses/TranslationChain.kt`).
+
+> Mastodon lists the owner's statuses newest-first by status ID (creation
+> order; edits do not reorder the listing). A translation reply is always
+> created after its original, so whenever the original is inside the scan
+> window, its segments are too: the chain can always be reconstructed from
+> the fetch result.
+
+LLM translation, posting, and periodic polling are not implemented yet.
+Everything is read-only: the application does not delete or update any toots
+at this stage.
+
+The chain rules — what counts as a complete chain, why stale chains are
+accepted (one-shot), the language scoping for deployments sharing one
+account, and the leaf-first deletion contract for invalid chains — are
+documented on `findTranslationChainState` in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/TranslationChain.kt`.
+The filter only decides eligibility; see `filter/TootFilter.kt`.
 
 ### Known limitations (current stage)
 
-Whether an original counts as translated is not decided by tracing its reply
-chain: any direct reply carrying a valid footer (the `🌐{hash}#{seq}#{total}`
-marker, see `llm/Footer.kt`) in the target language marks the original as
-done. The footer's hash, the segment order, and the completeness of the chain
-are not checked, and partial or stale translations are never cleaned up or
-refreshed; the policy lives in `filter/TootFilter.kt`. Accepted defects:
-
-- A half-posted chain (for example only `#1#3` of a 3-segment translation
-  went out before an interruption) suppresses its original: the missing
-  segments are never posted.
-- An original edited after its translation was posted is not re-translated
-  (one-shot policy), even though the footer's hash no longer matches the
-  current text.
-
-Recovery is manual: delete the partial or stale translation replies on the
-instance, and the next scan will treat the original as pending again.
+- Invalid chains (for example a half-posted `#1#3` of a 3-segment
+  translation, or a valid chain with a leftover segment) are detected and
+  their segments are listed for deletion before retranslation, but the
+  actual delete-and-repost flow needs the translation and posting stage:
+  nothing is cleaned up or posted yet.
+- A translated original is never refreshed: the one-shot policy accepts a
+  complete chain even when the original was edited afterwards. The footer
+  hash lets a reader detect the mismatch; this project ships no tooling for
+  that yet.
+- Segments made unreachable by a parent deleted outside this application
+  are not discovered and stay on the instance; clean up manually.
 
 ## Access Token
 
@@ -158,7 +170,7 @@ try {
 ```
 
 In the application, Koin owns the pool and calls `close()` during teardown,
-on normal exit or JVM shutdown (including Docker's SIGTERM). Closing cancels
+on normal exit, or JVM shutdown (including Docker's SIGTERM). Closing cancels
 pending lookups and waits for worker cleanup; it does not drain requests.
 
 Lookups return `null` for statuses unavailable to the current token.
