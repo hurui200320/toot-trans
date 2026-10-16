@@ -13,6 +13,7 @@ import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +89,13 @@ fun appModule(config: ConfigStore): Module = module {
             rateLimitBackoff = get(),
         )
     } withOptions { onClose { it?.close() } }
+
+    // deletes obsolete translation segments through the same client,
+    // dropping each deleted status from the pool; the shared backoff
+    // singleton paces its 429 retries like the pool worker and scan
+    single<StatusesDeleter> {
+        StatusesDeleter(get(), get(), get())
+    }
 
     single<TootFilter> {
         TootFilter(get(), config.targetLangCode, config.translationCooldown)

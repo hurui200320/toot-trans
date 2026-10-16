@@ -27,8 +27,9 @@ the scanned statuses (see `masto/statuses/TranslationChain.kt`).
 > the fetch result.
 
 LLM translation, posting, and periodic polling are not implemented yet.
-Everything is read-only: the application does not delete or update any toots
-at this stage.
+Invalid translation chains are already cleaned up: their obsolete segments
+are deleted (see `masto/statuses/StatusesDeleter.kt`), but the replacement
+translation is not posted yet.
 
 The chain rules — what counts as a complete chain, why stale chains are
 accepted (one-shot), the language scoping for deployments sharing one
@@ -41,9 +42,8 @@ The filter only decides eligibility; see `filter/TootFilter.kt`.
 
 - Invalid chains (for example a half-posted `#1#3` of a 3-segment
   translation, or a valid chain with a leftover segment) are detected and
-  their segments are listed for deletion before retranslation, but the
-  actual delete-and-repost flow needs the translation and posting stage:
-  nothing is cleaned up or posted yet.
+  their segments are deleted before retranslation, but the retranslation
+  itself needs the translation and posting stage: nothing is posted yet.
 - A translated original is never refreshed: the one-shot policy accepts a
   complete chain even when the original was edited afterwards. The footer
   hash lets a reader detect the mismatch; this project ships no tooling for
@@ -110,8 +110,8 @@ are documented in its KDoc in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`,
 and the `backoff*` ones tune
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/RateLimitBackoff.kt` —
-the 429 backoff policy shared by the pool's worker and boot-up scan,
-so both honor these settings.
+the 429 backoff policy shared by the pool's worker, the boot-up scan, and
+status deletion, so they all honor these settings.
 The `initialScanSize` setting controls how many of the owner's latest toots
 the boot-up scan fetches and feeds into the pool, and the `scanTransient*`
 ones bound that scan's retries of transient failures (5xx and transport
@@ -176,7 +176,10 @@ pending lookups and waits for worker cleanup; it does not drain requests.
 
 Lookups return `null` for statuses unavailable to the current token.
 Cache bypass still obeys the pool's batching and rate-limit handling.
-Account polling, status-source reads, posting, and deletion remain outside
-the pool. The startup scan handles its own rate limits using the shared
-backoff policy; future source/posting flows must do the same. The filter
-does not invoke deletion.
+Account polling, status-source reads, and posting remain outside the pool.
+Deletion goes through `masto/statuses/StatusesDeleter.kt` instead of
+calling the HTTP client directly: it deletes leaf-first, honors the shared
+429 backoff, and calls `pool.invalidate` after every successful DELETE.
+The startup scan handles its own rate limits using the shared backoff
+policy; future posting flows must do the same. The filter does not invoke
+deletion.

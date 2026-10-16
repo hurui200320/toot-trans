@@ -12,6 +12,7 @@ import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -119,6 +120,9 @@ class AppModuleTest {
             // the shared backoff single: resolved by the pool above and,
             // like Main.kt does for the boot-up scan, directly too
             app.koin.get<RateLimitBackoff>()
+            // resolves; by Koin construction it shares the client, pool,
+            // and backoff singles with the pool
+            assertIs<StatusesDeleter>(app.koin.get<StatusesDeleter>())
             app.koin.get<TootFilter>()
 
             // CredentialAccount is left out here: its resolution performs

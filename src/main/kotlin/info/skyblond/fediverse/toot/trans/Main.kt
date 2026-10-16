@@ -6,6 +6,7 @@ import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
 import info.skyblond.fediverse.toot.trans.masto.statuses.findTranslationChainState
@@ -25,6 +26,7 @@ fun main() {
     try {
         val accountsClient = koin.get<AccountsClient>()
         val statusesPool = koin.get<StatusesPool>()
+        val deleter = koin.get<StatusesDeleter>()
         val filter = koin.get<TootFilter>()
         val account = koin.get<CredentialAccount>()
         val rateLimitBackoff = koin.get<RateLimitBackoff>()
@@ -38,6 +40,10 @@ fun main() {
                 transientRetryDelay = config.scanTransientRetryDelay,
             )
 
+            // TODO: filter is hidden states, we don't know if a toot is:
+            //       a) don't need to translate, or b) we can't translate it now
+            //       no harm today but when we need to implement rolling,
+            //       we need this info to update the cursor (sinceId)
             val pending = filter.filter(toots, account)
             logger.info { "Eligible originals: ${pending.size}" }
             pending.forEach { toot ->
@@ -48,12 +54,14 @@ fun main() {
 
                     is TranslationChainState.NeedsTranslation -> {
                         if (state.obsolete.isNotEmpty()) {
-                            // TODO: delete state.obsolete leaf-first, then LLM translate and post.
-                            logger.warn {
-                                "Should delete obsolete segments: ${state.obsolete.joinToString { it.id }}"
+                            // leaf-first, as ordered by findTranslationChainState
+                            deleter.delete(state.obsolete)
+                            logger.info {
+                                "Deleted obsolete segments: ${state.obsolete.joinToString { it.id }}"
                             }
                         }
 
+                        // TODO: LLM translate and post.
                         logger.info {
                             "Pending translation: id=${toot.id}, " +
                                     "reason=${state.reason}, obsolete=${state.obsolete.size}, " +
