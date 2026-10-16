@@ -37,70 +37,6 @@
 
 ---
 
-## 3. 项目依赖与最小数据模型
-
-### 3.1 Gradle 依赖 (`build.gradle.kts`)
-```kotlin
-plugins {
-    kotlin("jvm") version "2.1.0"
-    kotlin("plugin.serialization") version "2.1.0"
-}
-
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-}
-```
-
-### 3.2 JSON 序列化配置与最小实体模型
-务必开启 `ignoreUnknownKeys = true`，仅映射核心稳定字段：
-
-```kotlin
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-
-val jsonParser = Json {
-    ignoreUnknownKeys = true
-    coerceInputValues = true
-}
-
-@Serializable
-data class Account(
-    val id: String,
-    val username: String = ""
-)
-
-@Serializable
-data class Status(
-    val id: String,
-    @SerialName("created_at") val createdAt: String,
-    @SerialName("edited_at") val editedAt: String? = null,
-    val account: Account? = null,
-    val content: String = "", // HTML 格式正文
-    @SerialName("spoiler_text") val spoilerText: String = "", // CW 折叠警告词
-    val visibility: String = "public", // public, unlisted, private, direct
-    val sensitive: Boolean = false,
-    val language: String? = null,
-    @SerialName("in_reply_to_id") val inReplyToId: String? = null,
-    @SerialName("in_reply_to_account_id") val inReplyToAccountId: String? = null,
-    val reblog: Status? = null
-)
-
-@Serializable
-data class StatusSource(
-    val id: String,
-    val text: String, // 发帖时的原始纯文本
-    @SerialName("spoiler_text") val spoilerText: String = ""
-)
-```
-
----
-
 ## 4. 尾标协议与字数切分规则
 
 ### 4.1 尾标格式：`🌐{hash}#{x}#{y}`
@@ -154,12 +90,11 @@ Mastodon 的 Status ID 是按时间单调递增的 Snowflake ID，列表接口�
 
 #### Step 3：筛选待翻译推文（0 次请求）
 将 `candidatePool` 按发布时间**从旧到新**排序，筛选出同时满足以下全部条件的推文 `P`：
-1. **时间水位线（Cutoff）**：`now - P.created_at <= 24 小时`（防止重启时扫描远古未翻译推文）。
-2. **冷却期已满（Cooldown）**：取 `effectiveTime = P.editedAt ?: P.createdAt`，需满足 `now - effectiveTime >= configuredCooldown`（如 3 分钟；若在冷却期内编辑过推文，倒计时自动顺延）。
-3. **非对外回复**：`P.inReplyToAccountId == null || P.inReplyToAccountId == myAccountId`（只翻译原创主帖和自己的串，不打扰别人评论区）。
+1. **冷却期已满（Cooldown）**：取 `effectiveTime = P.editedAt ?: P.createdAt`，需满足 `now - effectiveTime >= configuredCooldown`（如 3 分钟；若在冷却期内编辑过推文，倒计时自动顺延）。
+2. **非对外回复**：`P.inReplyToAccountId == null || P.inReplyToAccountId == myAccountId`（只翻译原创主帖和自己的串，不打扰别人评论区）。
   + 需要构建整条回复串，需要保证每条都是回复自己的。如果1回复别人，2回复了1，这个时候不应该翻译。
-4. **包含中文且非英文帖**：`P.language != "en"` 且正文/CW 包含中文字符（`[\u4e00-\u9fff]`）。
-5. **尚未完成翻译**：
+3. **包含中文且非英文帖**：`P.language != "en"` 且正文/CW 包含中文字符（`[\u4e00-\u9fff]`）。
+4. **尚未完成翻译**：
     - 若 `P.id` 下已存在翻译链 `E1..Ek`，且尾节点 `Ek` 的尾标满足 `x == y`（同时 `k == y`），说明**已翻译完成**，直接跳过。
     - **异常残链自愈**：若 `P.id` 下存在翻译链，但尾节点 `x < y`（说明上次发多段回复时中途网络中断），则先按 **从末端到根部（`Ek -> ... -> E1`）的逆序** 调用 `DELETE /api/v1/statuses/{id}` 清理残链，再进入 Step 4 重新翻译。
 
