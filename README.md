@@ -135,7 +135,8 @@ allows `0s` and `translationCooldown` which is finite and non-negative;
 `scanTransientMaxRetry` must be non-negative, where `0` disables the boot-up
 scan and transient retries respectively).
 
-The cooldown policy is documented on `filter/TootFilter.kt`.
+The eligibility policy — the cooldown and the translated-ancestry
+prerequisite — is documented on `filter/TootFilter.kt`.
 `initialScanSize` limits the number of recent posts, not their age; there is
 no separate time cutoff.
 

@@ -38,8 +38,8 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 - `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
   chain, instance API transport, statuses pool, and the application
   coroutine scope.
-- `filter/TootFilter.kt`: basic, read-only eligibility selection; translation
-  state is decided elsewhere.
+- `filter/TootFilter.kt`: basic, read-only eligibility selection, including
+  the ancestor-translation prerequisite for reply chains.
 - `masto/statuses/ReplyChain.kt`: full ancestor qualification.
 - `masto/statuses/TranslationChain.kt`: in-memory reconstruction and
   classification of an original's translation chain.

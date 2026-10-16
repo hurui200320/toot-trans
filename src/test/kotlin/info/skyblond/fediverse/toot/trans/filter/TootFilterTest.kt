@@ -120,7 +120,9 @@ class TootFilterTest {
             content = "<p>Hello<br>🌐AAAAAAAA#0#1</p>",
             language = "zh",
         )
-        val f = FilterTestFixture(this, listOf(p, reply))
+        // the reply waits for p's translation, so seed one
+        val parentTranslation = translation("T-P", parent = "P")
+        val f = FilterTestFixture(this, listOf(p, reply, parentTranslation))
         assertEquals(listOf(p, reply), f.filter())
         assertTrue(f.lookups.isEmpty())
     }
@@ -142,9 +144,134 @@ class TootFilterTest {
         val missing = original("missing", "gone")
         val inconsistent = original("inconsistent", "root", null)
         val cycle = original("cycle", "cycle")
-        val f = FilterTestFixture(this, listOf(root, self, external, nestedExternal, missing, inconsistent, cycle))
+        // self waits for the translated-ancestry prerequisite, so root
+        // must carry a translation for this test to see self
+        val rootTranslation = translation("T-root", parent = "root")
+        val f = FilterTestFixture(
+            this,
+            listOf(root, self, external, nestedExternal, missing, inconsistent, cycle, rootTranslation),
+        )
         assertEquals(listOf(root, self), f.filter())
         assertEquals(listOf(setOf("gone")), f.lookups)
+    }
+
+    @Test
+    fun `an untranslated in-scan ancestor defers its descendants`() = runTest {
+        val statuses = listOf(
+            original("A"),
+            original("B", parent = "A"),
+            original("C", parent = "B"),
+        )
+        val f = FilterTestFixture(this, statuses)
+        // B waits for A's translation, C for the whole visible chain
+        assertEquals(listOf("A"), f.filter().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `a translated ancestor unblocks the next generation`() = runTest {
+        val statuses = listOf(
+            original("A"),
+            translation("TA", parent = "A"),
+            original("B", parent = "A"),
+            original("C", parent = "B"),
+        )
+        val f = FilterTestFixture(this, statuses)
+        assertEquals(listOf("A", "B"), f.filter().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `an edited ancestor resetting its cooldown keeps descendants deferred`() = runTest {
+        val statuses = listOf(
+            original("A"),
+            original("B", parent = "A").copy(editedAt = now.minusSeconds(1)),
+            original("C", parent = "B"),
+        )
+        val f = FilterTestFixture(this, statuses)
+        // B is still cooling down, so C has no B translation to build on
+        assertEquals(listOf("A"), f.filter().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `a stale complete ancestor chain still settles the prerequisite`() = runTest {
+        val statuses = listOf(
+            original("A"),
+            translation("TA", parent = "A", hash = "AAAAAAAA"),
+            original("B", parent = "A"),
+        )
+        val f = FilterTestFixture(this, statuses)
+        assertEquals(listOf("A", "B"), f.filter().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `ancestors that need no translation never block their replies`() = runTest {
+        val cases = mapOf(
+            "target language" to original("A-en").copy(language = "en"),
+            "blank body" to original("A-blank").copy(content = "<p><br></p>", spoilerText = null),
+            "footer post" to translation("A-tr").copy(inReplyToId = null, inReplyToAccountId = null),
+        )
+        cases.forEach { (case, ancestor) ->
+            val child = original("child", parent = ancestor.id)
+            val f = FilterTestFixture(this, listOf(ancestor, child))
+            assertEquals(listOf("child"), f.filter().map { it.id }, case)
+            assertTrue(f.lookups.isEmpty(), case)
+        }
+    }
+
+    @Test
+    fun `a reply to a translation segment walks past it to the original`() = runTest {
+        val statuses = listOf(
+            original("A"),
+            translation("TA", parent = "A"),
+            original("child", parent = "TA"),
+        )
+        val f = FilterTestFixture(this, statuses)
+        // the footer parent needs no translation, but the walk must
+        // continue to TA's parent A and require its chain
+        assertEquals(listOf("A", "child"), f.filter().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `ancestors outside the scan are assumed settled`() = runTest {
+        val outside = original("outside")
+        val child = original("child", parent = "outside")
+        val f = FilterTestFixture(this, listOf(child, outside))
+        // ancestry still resolves the parent through the pool, but the
+        // prerequisite walks only the scan
+        assertEquals(listOf("child"), f.filter(statuses = listOf(child)).map { it.id })
+        assertEquals(listOf(setOf("outside")), f.lookups)
+    }
+
+    @Test
+    fun `an invalid ancestor chain blocks its descendants`() = runTest {
+        val statuses = listOf(
+            original("A"),
+            translation("TA1", parent = "A", seq = 1, total = 2),
+            original("B", parent = "A"),
+        )
+        val f = FilterTestFixture(this, statuses)
+        // A's half-posted chain does not count as translated
+        assertEquals(listOf("A"), f.filter().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `a gap above a translated ancestor still blocks descendants`() = runTest {
+        val statuses = listOf(
+            original("X"),
+            original("A", parent = "X"),
+            translation("TA", parent = "A"),
+            original("B", parent = "A"),
+        )
+        val f = FilterTestFixture(this, statuses)
+        // A is translated but its own parent X is not: B waits for the
+        // full visible chain, not just the immediate parent
+        assertEquals(listOf("X"), f.filter().map { it.id })
+        assertTrue(f.lookups.isEmpty())
     }
 
     @Test
