@@ -45,6 +45,13 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 - `masto/statuses/ReplyChain.kt`: full ancestor qualification.
 - `masto/statuses/TranslationChain.kt`: in-memory reconstruction and
   classification of an original's translation chain.
+- `llm/client/ChatClient.kt`: stateless, non-streaming Chat Completions
+  contract; entry point for the wire documentation.
+- `llm/client/OkHttpChatClient.kt`: direct transport: endpoint derivation,
+  error-body mapping and injected-client timeouts.
+- `llm/client/RetryingChatClient.kt`: fixed-delay retry policy for transient
+  failures.
+- `llm/client/Models.kt`: Chat Completions wire models.
 
 ## Architecture
 

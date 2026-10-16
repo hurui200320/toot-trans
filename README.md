@@ -26,7 +26,9 @@ the scanned statuses (see `masto/statuses/TranslationChain.kt`).
 > window, its segments are too: the chain can always be reconstructed from
 > the fetch result.
 
-LLM translation, posting, and periodic polling are not implemented yet.
+LLM translation, posting, and periodic polling are not implemented yet: the
+OpenAI-compatible chat client is implemented (see [LLM client](#llm-client)),
+but nothing calls it until the translation stage lands.
 Invalid translation chains are already cleaned up: their obsolete segments
 are deleted (see `masto/statuses/StatusesDeleter.kt`), but the replacement
 translation is not posted yet.
@@ -183,3 +185,51 @@ calling the HTTP client directly: it deletes leaf-first, honors the shared
 The startup scan handles its own rate limits using the shared backoff
 policy; future posting flows must do the same. The filter does not invoke
 deletion.
+
+## LLM client
+
+Translation talks to models through the OpenAI-compatible chat client in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/llm/client/` (`ChatClient`,
+`OkHttpChatClient`, `RetryingChatClient`). The client is deliberately
+provider-agnostic and aims to support as many OpenAI-compatible providers as we
+can — OpenAI itself, llama.cpp's server, DeepInfra, synthetic.new, Novita,
+ZenMux, Gemini's OpenAI compatibility layer, and any other gateway that speaks
+`POST /chat/completions`. Pointing it at a provider is just an API root (a path
+such as `/v1` is expected) and an API key. The transport builds no HTTP client of
+its own: the caller injects one, built with the recommended timeouts on
+`OkHttpChatClient` (`RECOMMENDED_READ_TIMEOUT` / `RECOMMENDED_WRITE_TIMEOUT`
+because generation can run for minutes, `RECOMMENDED_CONNECT_TIMEOUT` so an
+unreachable endpoint fails fast).
+
+A summary of the behavior; the KDoc in the files above is the authoritative
+reference, and the provider-specific notes live on `ChatCompletionRequest.extra`:
+
+- **Chat Completions, not the Responses API.** The conversation is only the
+  caller-supplied message list — no server-side conversation objects to create or
+  clean up — which matches the project's no-state design. The full rationale and
+  the provider-compatibility argument are documented on `ChatClient`.
+- **Non-streaming only.** `stream` is pinned to `false` on the wire; answers are
+  always complete objects, never partial deltas.
+- **Multi-turn history and images.** Previous turns are caller-supplied
+  `system` / `user` / `assistant` messages; images are base64 `data:` URLs because
+  the caller downloads the media (providers never fetch URLs on our behalf, and
+  private or followers-only toot media would not be reachable for them anyway).
+  Base64 inflates image payloads by about a third and every retry resends the whole
+  body, so callers must bound the number and size of images.
+- **Minimal standard parameters, everything else via `extra`.** Standard knobs are
+  `model`, `messages`, `max_completion_tokens` (covers thinking tokens too) and
+  `reasoning_effort` (thinking control; some models cannot disable thinking).
+  Anything provider-specific — `temperature` and other sampling parameters, plus
+  each provider's own thinking switches — goes through `extra`, which is merged
+  into the top-level request body; keys the client owns (`model`, `messages`,
+  `stream`, ...) are rejected. The provider-specific notes live on
+  `ChatCompletionRequest.extra`. Thinking output is deliberately never parsed:
+  only the final answer is used.
+- **Retry policy.** Connection failures and transient provider answers
+  (408, 429, and all 5xx) are retried on a fixed delay with a bounded
+  attempt budget (see `RetryingChatClient` for the exact policy); invalid requests,
+  rejected keys, 402s and 403s, and malformed responses fail immediately, and a
+  failed translation is simply retried by the next polling cycle.
+
+The client is not wired into the application yet: nothing calls it until the
+translation stage is implemented.
