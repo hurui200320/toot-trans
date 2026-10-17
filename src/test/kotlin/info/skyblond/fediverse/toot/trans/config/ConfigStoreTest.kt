@@ -4,15 +4,22 @@ import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
 import info.skyblond.fediverse.toot.trans.filter.TootFilter
+import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.toKotlinDuration
 
 class ConfigStoreTest {
     private fun provider(
@@ -25,11 +32,20 @@ class ConfigStoreTest {
         backoffFallbackDelay: Duration? = null,
         backoffMaxWaitDuration: Duration? = null,
         initialScanSize: Int? = null,
-        scanTransientMaxRetry: Int? = null,
-        scanTransientRetryDelay: Duration? = null,
+        transientMaxRetry: Int? = null,
+        transientRetryDelay: Duration? = null,
         targetLanguage: String? = null,
         targetLangCode: String? = null,
         translationCooldown: Duration? = null,
+        llmBaseUrl: String? = null,
+        llmApiKey: String? = null,
+        llmConnectTimeout: Duration? = null,
+        llmReadTimeout: Duration? = null,
+        llmWriteTimeout: Duration? = null,
+        llmModel: String? = null,
+        llmMaxCompletionTokens: Int? = null,
+        llmReasoningEffort: ReasoningEffort? = null,
+        llmReqExtra: JsonObject? = null,
     ): ConfigProvider = object : ConfigProvider {
         override val mastoHost: String? = mastoHost
         override val accessToken: String? = accessToken
@@ -40,11 +56,20 @@ class ConfigStoreTest {
         override val backoffFallbackDelay: Duration? = backoffFallbackDelay
         override val backoffMaxWaitDuration: Duration? = backoffMaxWaitDuration
         override val initialScanSize: Int? = initialScanSize
-        override val scanTransientMaxRetry: Int? = scanTransientMaxRetry
-        override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
+        override val transientMaxRetry: Int? = transientMaxRetry
+        override val transientRetryDelay: Duration? = transientRetryDelay
         override val targetLanguage: String? = targetLanguage
         override val targetLangCode: String? = targetLangCode
         override val translationCooldown: Duration? = translationCooldown
+        override val llmBaseUrl: String? = llmBaseUrl
+        override val llmApiKey: String? = llmApiKey
+        override val llmConnectTimeout: Duration? = llmConnectTimeout
+        override val llmReadTimeout: Duration? = llmReadTimeout
+        override val llmWriteTimeout: Duration? = llmWriteTimeout
+        override val llmModel: String? = llmModel
+        override val llmMaxCompletionTokens: Int? = llmMaxCompletionTokens
+        override val llmReasoningEffort: ReasoningEffort? = llmReasoningEffort
+        override val llmReqExtra: JsonObject? = llmReqExtra
     }
 
     @Test
@@ -205,52 +230,52 @@ class ConfigStoreTest {
     }
 
     @Test
-    fun `scan transient configs follow the first non-null provider`() {
+    fun `transient configs follow the first non-null provider`() {
         val store = ConfigStore(
             listOf(
-                provider(scanTransientMaxRetry = 5, scanTransientRetryDelay = 30.seconds),
-                provider(scanTransientMaxRetry = 9, scanTransientRetryDelay = 40.seconds),
+                provider(transientMaxRetry = 5, transientRetryDelay = 30.seconds),
+                provider(transientMaxRetry = 9, transientRetryDelay = 40.seconds),
             )
         )
 
-        assertEquals(5, store.scanTransientMaxRetry)
-        assertEquals(30.seconds, store.scanTransientRetryDelay)
+        assertEquals(5, store.transientMaxRetry)
+        assertEquals(30.seconds, store.transientRetryDelay)
     }
 
     @Test
-    fun `scan transient configs skip nulls and fall back to later providers`() {
+    fun `transient configs skip nulls and fall back to later providers`() {
         val store = ConfigStore(
             listOf(
                 // nothing configured
                 provider(),
-                provider(scanTransientRetryDelay = 30.seconds),
-                provider(scanTransientRetryDelay = 40.seconds),
+                provider(transientRetryDelay = 30.seconds),
+                provider(transientRetryDelay = 40.seconds),
             )
         )
 
-        assertEquals(30.seconds, store.scanTransientRetryDelay)
+        assertEquals(30.seconds, store.transientRetryDelay)
     }
 
     @Test
-    fun `malformed scan transient config in an earlier provider fails fast instead of falling through`() {
+    fun `malformed transient config in an earlier provider fails fast instead of falling through`() {
         val store = ConfigStore(
             listOf(
-                // simulates a malformed env var, e.g. SCAN_TRANSIENT_RETRY_DELAY=soon
-                EnvConfigProvider(mapOf("SCAN_TRANSIENT_RETRY_DELAY" to "soon")::get),
-                provider(scanTransientRetryDelay = 30.seconds),
+                // simulates a malformed env var, e.g. TRANSIENT_RETRY_DELAY=soon
+                EnvConfigProvider(mapOf("TRANSIENT_RETRY_DELAY" to "soon")::get),
+                provider(transientRetryDelay = 30.seconds),
             )
         )
 
-        val exception = assertFailsWith<IllegalArgumentException> { store.scanTransientRetryDelay }
-        assertTrue(exception.message!!.contains("SCAN_TRANSIENT_RETRY_DELAY"))
+        val exception = assertFailsWith<IllegalArgumentException> { store.transientRetryDelay }
+        assertTrue(exception.message!!.contains("TRANSIENT_RETRY_DELAY"))
     }
 
     @Test
-    fun `throws when no provider supplies a scan transient config`() {
+    fun `throws when no provider supplies a transient config`() {
         val store = ConfigStore(listOf(provider()))
 
-        val exception = assertFailsWith<MissingConfigException> { store.scanTransientMaxRetry }
-        assertTrue(exception.message!!.contains("scan transient max retry"))
+        val exception = assertFailsWith<MissingConfigException> { store.transientMaxRetry }
+        assertTrue(exception.message!!.contains("transient max retry"))
     }
 
     @Test
@@ -349,7 +374,7 @@ class ConfigStoreTest {
     }
 
     @Test
-    fun `built-in defaults fill unconfigured scan transient configs`() {
+    fun `built-in defaults fill unconfigured transient configs`() {
         val store = ConfigStore(
             listOf(
                 provider(),
@@ -357,8 +382,97 @@ class ConfigStoreTest {
             )
         )
 
-        assertEquals(DEFAULT_TRANSIENT_MAX_RETRY, store.scanTransientMaxRetry)
-        assertEquals(DEFAULT_TRANSIENT_RETRY_DELAY, store.scanTransientRetryDelay)
+        assertEquals(DEFAULT_TRANSIENT_MAX_RETRY, store.transientMaxRetry)
+        assertEquals(DEFAULT_TRANSIENT_RETRY_DELAY, store.transientRetryDelay)
+    }
+
+    @Test
+    fun `LLM configs follow the first non-null provider`() {
+        val store = ConfigStore(
+            listOf(
+                provider(
+                    llmBaseUrl = "https://first.example/v1",
+                    llmApiKey = "first-key",
+                    llmConnectTimeout = 5.seconds,
+                    llmModel = "first-model",
+                    llmMaxCompletionTokens = 1000,
+                    llmReasoningEffort = ReasoningEffort.LOW,
+                    llmReqExtra = JsonObject(mapOf("temperature" to JsonPrimitive(0.2))),
+                ),
+                provider(
+                    llmBaseUrl = "https://second.example/v1",
+                    llmApiKey = "second-key",
+                    llmConnectTimeout = 6.seconds,
+                    llmModel = "second-model",
+                    llmMaxCompletionTokens = 2000,
+                    llmReasoningEffort = ReasoningEffort.HIGH,
+                    llmReqExtra = JsonObject(emptyMap()),
+                ),
+            )
+        )
+
+        assertEquals("https://first.example/v1", store.llmBaseUrl)
+        assertEquals("first-key", store.llmApiKey)
+        assertEquals(5.seconds, store.llmConnectTimeout)
+        assertEquals("first-model", store.llmModel)
+        assertEquals(1000, store.llmMaxCompletionTokens)
+        assertEquals(ReasoningEffort.LOW, store.llmReasoningEffort)
+        assertEquals("0.2", store.llmReqExtra["temperature"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `throws when no provider supplies a required LLM config`() {
+        val store = ConfigStore(listOf(provider()))
+
+        val missingBaseUrl = assertFailsWith<MissingConfigException> { store.llmBaseUrl }
+        assertTrue(missingBaseUrl.message!!.contains("llm base url"))
+        val missingApiKey = assertFailsWith<MissingConfigException> { store.llmApiKey }
+        assertTrue(missingApiKey.message!!.contains("llm api key"))
+        val missingModel = assertFailsWith<MissingConfigException> { store.llmModel }
+        assertTrue(missingModel.message!!.contains("llm model"))
+        val missingMaxTokens = assertFailsWith<MissingConfigException> { store.llmMaxCompletionTokens }
+        assertTrue(missingMaxTokens.message!!.contains("llm max completion tokens"))
+    }
+
+    @Test
+    fun `llm reasoning effort is optional and resolves to null when unset`() {
+        // nobody configured it: null is the resolved value, the request
+        // will omit the field, not a MissingConfigException
+        assertNull(ConfigStore(listOf(provider())).llmReasoningEffort)
+
+        // still first-non-null like every other setting: a later provider
+        // can supply the value when earlier ones leave it unset
+        val configured = ConfigStore(listOf(provider(), provider(llmReasoningEffort = ReasoningEffort.LOW)))
+        assertEquals(ReasoningEffort.LOW, configured.llmReasoningEffort)
+    }
+
+    @Test
+    fun `built-in defaults fill unconfigured LLM timeouts and request extra`() {
+        val store = ConfigStore(
+            listOf(
+                provider(),
+                DefaultConfigProvider()
+            )
+        )
+
+        assertEquals(OkHttpChatClient.RECOMMENDED_CONNECT_TIMEOUT.toKotlinDuration(), store.llmConnectTimeout)
+        assertEquals(OkHttpChatClient.RECOMMENDED_READ_TIMEOUT.toKotlinDuration(), store.llmReadTimeout)
+        assertEquals(OkHttpChatClient.RECOMMENDED_WRITE_TIMEOUT.toKotlinDuration(), store.llmWriteTimeout)
+        assertEquals(JsonObject(emptyMap()), store.llmReqExtra)
+    }
+
+    @Test
+    fun `malformed LLM config in an earlier provider fails fast instead of falling through`() {
+        val store = ConfigStore(
+            listOf(
+                // simulates a malformed env var, e.g. LLM_REASONING_EFFORT=whenever
+                EnvConfigProvider(mapOf("LLM_REASONING_EFFORT" to "whenever")::get),
+                provider(llmReasoningEffort = ReasoningEffort.LOW),
+            )
+        )
+
+        val exception = assertFailsWith<IllegalArgumentException> { store.llmReasoningEffort }
+        assertTrue(exception.message!!.contains("LLM_REASONING_EFFORT"))
     }
 
     @Test

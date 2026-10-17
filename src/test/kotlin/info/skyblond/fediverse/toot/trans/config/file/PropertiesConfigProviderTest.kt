@@ -1,5 +1,7 @@
 package info.skyblond.fediverse.toot.trans.config.file
 
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import kotlin.test.Test
@@ -125,8 +127,8 @@ class PropertiesConfigProviderTest {
         assertNull(provider.poolMaxCacheEntries)
         assertNull(provider.backoffFallbackDelay)
         assertNull(provider.initialScanSize)
-        assertNull(provider.scanTransientMaxRetry)
-        assertNull(provider.scanTransientRetryDelay)
+        assertNull(provider.transientMaxRetry)
+        assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
     }
 
@@ -160,19 +162,19 @@ class PropertiesConfigProviderTest {
     }
 
     @Test
-    fun `reads scan transient configs from the properties file`(@TempDir tempDir: File) {
+    fun `reads transient configs from the properties file`(@TempDir tempDir: File) {
         val file = tempDir.resolve("config.properties")
         file.writeText(
             """
-            scanTransientMaxRetry=5
-            scanTransientRetryDelay=30s
+            transientMaxRetry=5
+            transientRetryDelay=30s
             """.trimIndent()
         )
 
         val provider = PropertiesConfigProvider(file)
 
-        assertEquals(5, provider.scanTransientMaxRetry)
-        assertEquals(30.seconds, provider.scanTransientRetryDelay)
+        assertEquals(5, provider.transientMaxRetry)
+        assertEquals(30.seconds, provider.transientRetryDelay)
     }
 
     @Test
@@ -187,14 +189,14 @@ class PropertiesConfigProviderTest {
     }
 
     @Test
-    fun `invalid scan transient retry delay fails fast naming the key`(@TempDir tempDir: File) {
+    fun `invalid transient retry delay fails fast naming the key`(@TempDir tempDir: File) {
         val file = tempDir.resolve("config.properties")
-        file.writeText("scanTransientRetryDelay=soon\n")
+        file.writeText("transientRetryDelay=soon\n")
         val provider = PropertiesConfigProvider(file)
 
-        val e = assertFailsWith<IllegalArgumentException> { provider.scanTransientRetryDelay }
+        val e = assertFailsWith<IllegalArgumentException> { provider.transientRetryDelay }
 
-        assertTrue(e.message!!.contains("scanTransientRetryDelay"))
+        assertTrue(e.message!!.contains("transientRetryDelay"))
     }
 
     @Test
@@ -266,5 +268,78 @@ class PropertiesConfigProviderTest {
         val e = assertFailsWith<IllegalArgumentException> { provider.poolMaxCacheEntries }
 
         assertTrue(e.message!!.contains("poolMaxCacheEntries"))
+    }
+
+    @Test
+    fun `reads LLM configs from the properties file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText(
+            """
+            llmBaseUrl=https://api.example.com/v1
+            llmApiKey=some-key
+            llmConnectTimeout=5s
+            llmReadTimeout=15m
+            llmWriteTimeout=3m
+            llmModel=gpt-5-mini
+            llmMaxCompletionTokens=4096
+            llmReasoningEffort=medium
+            llmReqExtra={"temperature": 0.2}
+            """.trimIndent()
+        )
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertEquals("https://api.example.com/v1", provider.llmBaseUrl)
+        assertEquals("some-key", provider.llmApiKey)
+        assertEquals(5.seconds, provider.llmConnectTimeout)
+        assertEquals(15.minutes, provider.llmReadTimeout)
+        assertEquals(3.minutes, provider.llmWriteTimeout)
+        assertEquals("gpt-5-mini", provider.llmModel)
+        assertEquals(4096, provider.llmMaxCompletionTokens)
+        assertEquals(ReasoningEffort.MEDIUM, provider.llmReasoningEffort)
+        assertEquals("0.2", provider.llmReqExtra?.get("temperature")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `returns null for LLM keys missing from the file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("mastoHost=https://m.skyblond.info/\n")
+
+        val provider = PropertiesConfigProvider(file)
+
+        assertNull(provider.llmBaseUrl)
+        assertNull(provider.llmApiKey)
+        assertNull(provider.llmConnectTimeout)
+        assertNull(provider.llmReadTimeout)
+        assertNull(provider.llmWriteTimeout)
+        assertNull(provider.llmModel)
+        assertNull(provider.llmMaxCompletionTokens)
+        assertNull(provider.llmReasoningEffort)
+        assertNull(provider.llmReqExtra)
+    }
+
+    @Test
+    fun `invalid LLM values fail fast naming the key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("llmMaxCompletionTokens=many\n")
+        val badInt = assertFailsWith<IllegalArgumentException> {
+            PropertiesConfigProvider(file).llmMaxCompletionTokens
+        }
+        assertTrue(badInt.message!!.contains("llmMaxCompletionTokens"))
+        file.writeText("llmReadTimeout=fast\n")
+        val badDuration = assertFailsWith<IllegalArgumentException> {
+            PropertiesConfigProvider(file).llmReadTimeout
+        }
+        assertTrue(badDuration.message!!.contains("llmReadTimeout"))
+        file.writeText("llmReasoningEffort=smart\n")
+        val badEffort = assertFailsWith<IllegalArgumentException> {
+            PropertiesConfigProvider(file).llmReasoningEffort
+        }
+        assertTrue(badEffort.message!!.contains("llmReasoningEffort"))
+        file.writeText("llmReqExtra=[1, 2]\n")
+        val badExtra = assertFailsWith<IllegalArgumentException> {
+            PropertiesConfigProvider(file).llmReqExtra
+        }
+        assertTrue(badExtra.message!!.contains("llmReqExtra"))
     }
 }

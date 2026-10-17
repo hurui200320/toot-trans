@@ -1,5 +1,7 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -85,5 +87,50 @@ class ConfigValueParsingTest {
         // [ConfigProvider.targetLangCode]'s KDoc for why they are valid
         assertEquals("zh-CN", parseStringConfig("zh-CN"))
         assertEquals("en", parseStringConfig("en"))
+    }
+
+    @Test
+    fun `parses enum names case-insensitively`() {
+        assertEquals(ReasoningEffort.MEDIUM, parseEnumConfig<ReasoningEffort>("llmReasoningEffort", "medium"))
+        assertEquals(ReasoningEffort.MEDIUM, parseEnumConfig<ReasoningEffort>("llmReasoningEffort", "MEDIUM"))
+        assertEquals(ReasoningEffort.NONE, parseEnumConfig<ReasoningEffort>("llmReasoningEffort", " none "))
+    }
+
+    @Test
+    fun `null and blank mean not configured for enums and JSON objects`() {
+        assertNull(parseEnumConfig<ReasoningEffort>("llmReasoningEffort", null))
+        assertNull(parseEnumConfig<ReasoningEffort>("llmReasoningEffort", "   "))
+        assertNull(parseJsonObjectConfig("llmReqExtra", null))
+        assertNull(parseJsonObjectConfig("llmReqExtra", "   "))
+    }
+
+    @Test
+    fun `invalid enum value fails fast naming the config and accepted names`() {
+        val e = assertFailsWith<IllegalArgumentException> {
+            parseEnumConfig<ReasoningEffort>("llmReasoningEffort", "smart")
+        }
+        assertTrue(e.message!!.contains("llmReasoningEffort"))
+        assertTrue(e.message!!.contains("smart"))
+        assertTrue(e.message!!.contains("medium"))
+    }
+
+    @Test
+    fun `parses JSON objects`() {
+        val parsed = parseJsonObjectConfig("llmReqExtra", """{"temperature": 0.2, "enable_thinking": false}""")
+        assertEquals("0.2", parsed?.get("temperature")?.jsonPrimitive?.content)
+        assertEquals("false", parsed?.get("enable_thinking")?.jsonPrimitive?.content)
+        assertEquals("{}", parseJsonObjectConfig("llmReqExtra", " {} ")?.toString())
+    }
+
+    @Test
+    fun `malformed and non-object JSON fails fast naming the config`() {
+        val malformed = assertFailsWith<IllegalArgumentException> {
+            parseJsonObjectConfig("llmReqExtra", """{"temperature": }""")
+        }
+        assertTrue(malformed.message!!.contains("llmReqExtra"))
+        val nonObject = assertFailsWith<IllegalArgumentException> {
+            parseJsonObjectConfig("llmReqExtra", "[1, 2]")
+        }
+        assertTrue(nonObject.message!!.contains("llmReqExtra"))
     }
 }

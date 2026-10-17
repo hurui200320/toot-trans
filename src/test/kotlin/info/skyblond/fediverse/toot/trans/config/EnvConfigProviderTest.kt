@@ -1,5 +1,7 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -64,8 +66,8 @@ class EnvConfigProviderTest {
         assertNull(provider.poolMaxCacheEntries)
         assertNull(provider.backoffFallbackDelay)
         assertNull(provider.initialScanSize)
-        assertNull(provider.scanTransientMaxRetry)
-        assertNull(provider.scanTransientRetryDelay)
+        assertNull(provider.transientMaxRetry)
+        assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
         assertNull(provider.targetLanguage)
         assertNull(provider.targetLangCode)
@@ -102,16 +104,16 @@ class EnvConfigProviderTest {
     }
 
     @Test
-    fun `reads scan transient configs from the environment`() {
+    fun `reads transient configs from the environment`() {
         val provider = EnvConfigProvider(
             mapOf(
-                "SCAN_TRANSIENT_MAX_RETRY" to "5",
-                "SCAN_TRANSIENT_RETRY_DELAY" to "30s",
+                "TRANSIENT_MAX_RETRY" to "5",
+                "TRANSIENT_RETRY_DELAY" to "30s",
             )::get
         )
 
-        assertEquals(5, provider.scanTransientMaxRetry)
-        assertEquals(30.seconds, provider.scanTransientRetryDelay)
+        assertEquals(5, provider.transientMaxRetry)
+        assertEquals(30.seconds, provider.transientRetryDelay)
     }
 
     @Test
@@ -169,20 +171,82 @@ class EnvConfigProviderTest {
     }
 
     @Test
-    fun `invalid env scan transient max retry fails fast naming the variable`() {
-        val provider = EnvConfigProvider(mapOf("SCAN_TRANSIENT_MAX_RETRY" to "many")::get)
+    fun `invalid env transient max retry fails fast naming the variable`() {
+        val provider = EnvConfigProvider(mapOf("TRANSIENT_MAX_RETRY" to "many")::get)
 
-        val e = assertFailsWith<IllegalArgumentException> { provider.scanTransientMaxRetry }
+        val e = assertFailsWith<IllegalArgumentException> { provider.transientMaxRetry }
 
-        assertTrue(e.message!!.contains("SCAN_TRANSIENT_MAX_RETRY"))
+        assertTrue(e.message!!.contains("TRANSIENT_MAX_RETRY"))
     }
 
     @Test
-    fun `invalid env scan transient retry delay fails fast naming the variable`() {
-        val provider = EnvConfigProvider(mapOf("SCAN_TRANSIENT_RETRY_DELAY" to "soon")::get)
+    fun `invalid env transient retry delay fails fast naming the variable`() {
+        val provider = EnvConfigProvider(mapOf("TRANSIENT_RETRY_DELAY" to "soon")::get)
 
-        val e = assertFailsWith<IllegalArgumentException> { provider.scanTransientRetryDelay }
+        val e = assertFailsWith<IllegalArgumentException> { provider.transientRetryDelay }
 
-        assertTrue(e.message!!.contains("SCAN_TRANSIENT_RETRY_DELAY"))
+        assertTrue(e.message!!.contains("TRANSIENT_RETRY_DELAY"))
+    }
+
+    @Test
+    fun `reads LLM configs from the environment`() {
+        val provider = EnvConfigProvider(
+            mapOf(
+                "LLM_BASE_URL" to "https://api.example.com/v1",
+                "LLM_API_KEY" to "some-key",
+                "LLM_CONNECT_TIMEOUT" to "5s",
+                "LLM_READ_TIMEOUT" to "15m",
+                "LLM_WRITE_TIMEOUT" to "3m",
+                "LLM_MODEL" to "gpt-5-mini",
+                "LLM_MAX_COMPLETION_TOKENS" to "4096",
+                "LLM_REASONING_EFFORT" to "medium",
+                "LLM_REQ_EXTRA" to """{"temperature": 0.2}""",
+            )::get
+        )
+
+        assertEquals("https://api.example.com/v1", provider.llmBaseUrl)
+        assertEquals("some-key", provider.llmApiKey)
+        assertEquals(5.seconds, provider.llmConnectTimeout)
+        assertEquals(15.minutes, provider.llmReadTimeout)
+        assertEquals(3.minutes, provider.llmWriteTimeout)
+        assertEquals("gpt-5-mini", provider.llmModel)
+        assertEquals(4096, provider.llmMaxCompletionTokens)
+        assertEquals(ReasoningEffort.MEDIUM, provider.llmReasoningEffort)
+        assertEquals("0.2", provider.llmReqExtra?.get("temperature")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `returns null for missing LLM env vars`() {
+        val provider = EnvConfigProvider(emptyMap<String, String>()::get)
+
+        assertNull(provider.llmBaseUrl)
+        assertNull(provider.llmApiKey)
+        assertNull(provider.llmConnectTimeout)
+        assertNull(provider.llmReadTimeout)
+        assertNull(provider.llmWriteTimeout)
+        assertNull(provider.llmModel)
+        assertNull(provider.llmMaxCompletionTokens)
+        assertNull(provider.llmReasoningEffort)
+        assertNull(provider.llmReqExtra)
+    }
+
+    @Test
+    fun `invalid LLM env values fail fast naming the variable`() {
+        val badInt = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("LLM_MAX_COMPLETION_TOKENS" to "many")::get).llmMaxCompletionTokens
+        }
+        assertTrue(badInt.message!!.contains("LLM_MAX_COMPLETION_TOKENS"))
+        val badDuration = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("LLM_READ_TIMEOUT" to "fast")::get).llmReadTimeout
+        }
+        assertTrue(badDuration.message!!.contains("LLM_READ_TIMEOUT"))
+        val badEffort = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("LLM_REASONING_EFFORT" to "smart")::get).llmReasoningEffort
+        }
+        assertTrue(badEffort.message!!.contains("LLM_REASONING_EFFORT"))
+        val badExtra = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("LLM_REQ_EXTRA" to "{broken json")::get).llmReqExtra
+        }
+        assertTrue(badExtra.message!!.contains("LLM_REQ_EXTRA"))
     }
 }

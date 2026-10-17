@@ -27,8 +27,9 @@ the scanned statuses (see `masto/statuses/TranslationChain.kt`).
 > the fetch result.
 
 LLM translation, posting, and periodic polling are not implemented yet: the
-OpenAI-compatible chat client is implemented (see [LLM client](#llm-client)),
-but nothing calls it until the translation stage lands.
+OpenAI-compatible chat client is implemented and wired into the container
+(see [LLM client](#llm-client)), but nothing calls it until the translation
+stage lands.
 Invalid translation chains are already cleaned up: their obsolete segments
 are deleted (see `masto/statuses/StatusesDeleter.kt`), but the replacement
 translation is not posted yet.
@@ -87,8 +88,12 @@ order, and the first one providing a non-`null` value wins:
 The properties file is read only once at startup, as UTF-8.
 The default file name is gitignored, so you won't commit your token by accident.
 
-If a required setting is not provided by any source, the app fails to start with a
-`MissingConfigException` (fail-fast), instead of running with a half-empty config.
+If a required setting is not provided by any source, the app fails with a
+`MissingConfigException` (fail-fast) instead of running with a half-empty
+config: at startup for the settings the boot path reads (the instance
+connection, the target language, and the LLM transport — `llmBaseUrl`,
+`llmApiKey`), or when the translation stage first reads the ones only it
+consumes (`llmModel`, `llmMaxCompletionTokens`).
 
 | Setting | Environment variable | Properties key | Required | Example |
 |---|---|---|---|---|
@@ -101,11 +106,20 @@ If a required setting is not provided by any source, the app fails to start with
 | Backoff fallback delay | `BACKOFF_FALLBACK_DELAY` | `backoffFallbackDelay` | No, default `10s` | `30s` |
 | Backoff max wait duration | `BACKOFF_MAX_WAIT_DURATION` | `backoffMaxWaitDuration` | No, default `24h` | `1h` |
 | Initial scan size | `INITIAL_SCAN_SIZE` | `initialScanSize` | No, default `40` | `20` |
-| Scan transient max retry | `SCAN_TRANSIENT_MAX_RETRY` | `scanTransientMaxRetry` | No, default `10` | `5` |
-| Scan transient retry delay | `SCAN_TRANSIENT_RETRY_DELAY` | `scanTransientRetryDelay` | No, default `10s` | `30s` |
+| Transient max retry | `TRANSIENT_MAX_RETRY` | `transientMaxRetry` | No, default `10` | `5` |
+| Transient retry delay | `TRANSIENT_RETRY_DELAY` | `transientRetryDelay` | No, default `10s` | `30s` |
 | Translation cooldown | `TRANSLATION_COOLDOWN` | `translationCooldown` | No, default `3m`; `0s` disables | `1m` |
 | Target language | `TARGET_LANGUAGE` | `targetLanguage` | Yes | `English` |
 | Target lang code | `TARGET_LANG_CODE` | `targetLangCode` | Yes | `en` |
+| LLM base URL | `LLM_BASE_URL` | `llmBaseUrl` | Yes | `https://api.openai.com/v1` |
+| LLM API key | `LLM_API_KEY` | `llmApiKey` | Yes | your provider's key |
+| LLM connect timeout | `LLM_CONNECT_TIMEOUT` | `llmConnectTimeout` | No, default `30s`; `0s` disables | `10s` |
+| LLM read timeout | `LLM_READ_TIMEOUT` | `llmReadTimeout` | No, default `10m`; `0s` disables | `5m` |
+| LLM write timeout | `LLM_WRITE_TIMEOUT` | `llmWriteTimeout` | No, default `2m`; `0s` disables | `1m` |
+| LLM model | `LLM_MODEL` | `llmModel` | Yes | `gpt-5-mini` |
+| LLM max completion tokens | `LLM_MAX_COMPLETION_TOKENS` | `llmMaxCompletionTokens` | Yes | `4096` |
+| LLM reasoning effort | `LLM_REASONING_EFFORT` | `llmReasoningEffort` | No, unset omits the field | `medium` |
+| LLM request extra | `LLM_REQ_EXTRA` | `llmReqExtra` | No, default `{}` | `{"temperature": 0.2}` |
 
 The `pool*` settings tune `StatusesPool`; their batching and caching semantics
 are documented in its KDoc in
@@ -115,10 +129,17 @@ and the `backoff*` ones tune
 the 429 backoff policy shared by the pool's worker, the boot-up scan, and
 status deletion, so they all honor these settings.
 The `initialScanSize` setting controls how many of the owner's latest toots
-the boot-up scan fetches and feeds into the pool, and the `scanTransient*`
-ones bound that scan's retries of transient failures (5xx and transport
-errors; 429 backoff is governed by the `backoff*` settings instead), see
-`src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`.
+the boot-up scan fetches and feeds into the pool, and the `transient*` ones
+bound transient-failure retries (5xx and transport errors; 429 backoff is
+governed by the `backoff*` settings instead) globally: the boot-up scan uses
+them per page, and the LLM client's retry wrapper derives its attempt budget
+and fixed delay from them, see
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`; the previous
+`scanTransient*` names are gone. For the LLM client this means one completion
+can spend up to `transientMaxRetry + 1` attempts (the initial attempt plus
+that many retries), each attempt itself bounded by `llmReadTimeout`, so the
+budget multiplies the worst-case time a single translation can wait before
+the next polling cycle sees its failure.
 The `target*` pair picks the translation output: `targetLanguage` is the
 plain-text language name (e.g. `English`, `Simplified Chinese`), and
 `targetLangCode` is the language tag (e.g. `en`, `zh-CN`) used to tag the
@@ -128,14 +149,32 @@ tag — which tags round-trip unchanged, and why the configured value must
 be one of them for the bot to recognize its own replies — is documented
 on `targetLangCode`'s KDoc in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/config/ConfigProvider.kt`.
+The `llm*` settings configure the OpenAI-compatible chat client.
+`llmBaseUrl` and `llmApiKey` point it at a provider and are checked at
+startup: the base URL is the API root (a path such as `/v1` is expected; the
+transport appends the endpoint), and the API key is a secret and is never
+logged. The `llm*` timeouts apply to the LLM transport only — it is derived
+from the shared OkHttp client, so connections and threads are still pooled
+together — and default to the transport's recommended values
+(`30s` / `10m` / `2m`): generation is slow, while the instance API keeps
+OkHttp's defaults. `llmModel`, `llmMaxCompletionTokens`,
+`llmReasoningEffort` and `llmReqExtra` shape every completion request and are
+consumed once the translation stage lands: the reasoning effort accepts the
+enum names (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`,
+matched case-insensitively) and is optional — when unset, the field is
+omitted from the request, so providers that reject `reasoning_effort` are
+targeted by leaving it unset — and `llmReqExtra` must be a JSON object
+(defaulting to `{}` when unset) that does not name any field the client
+owns (see `ChatCompletionRequest.extra`).
 Duration values accept units like `500ms`, `1s`, `2m`, `24h`, as well as
 ISO-8601 durations like `PT24H`. An empty value is treated as unset; a
-malformed or out-of-range value fails startup with an error naming the
-setting (durations must be at least `1ms`, except `backoffResetMargin` which
-allows `0s` and `translationCooldown` which is finite and non-negative;
+malformed or out-of-range value fails with an error naming the setting
+(durations must be at least `1ms`, except `backoffResetMargin` which allows
+`0s`, `translationCooldown` which is finite and non-negative, and the `llm*`
+timeouts which are finite and non-negative, where `0` disables the timeout;
 `poolMaxCacheEntries` must be positive; `initialScanSize` and
-`scanTransientMaxRetry` must be non-negative, where `0` disables the boot-up
-scan and transient retries respectively).
+`transientMaxRetry` must be non-negative, where `0` disables the boot-up scan
+and transient retries respectively).
 
 The eligibility policy — the cooldown and the translated-ancestry
 prerequisite — is documented on `filter/TootFilter.kt`.
@@ -149,6 +188,15 @@ mastoHost=https://mastodon.social/
 accessToken=your-access-token
 targetLanguage=English
 targetLangCode=en
+
+# LLM provider settings: the base URL and key are needed at startup,
+# the rest once the translation stage lands
+# llmBaseUrl=https://api.openai.com/v1
+# llmApiKey=your-provider-key
+# llmModel=gpt-5-mini
+# llmMaxCompletionTokens=4096
+# llmReasoningEffort=medium
+# llmReqExtra={}
 ```
 
 ## Shared status lookups
@@ -231,5 +279,8 @@ reference, and the provider-specific notes live on `ChatCompletionRequest.extra`
   rejected keys, 402s and 403s, and malformed responses fail immediately, and a
   failed translation is simply retried by the next polling cycle.
 
-The client is not wired into the application yet: nothing calls it until the
+The client is wired into the application container: `ChatClient` resolves to
+`RetryingChatClient` over `OkHttpChatClient`, built from the `llm*` settings
+(see [Configuration](#configuration)) and resolved at startup, so a missing
+or invalid LLM transport config fails boot; nothing calls it until the
 translation stage is implemented.

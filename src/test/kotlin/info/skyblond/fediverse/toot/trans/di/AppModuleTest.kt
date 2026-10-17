@@ -5,6 +5,13 @@ import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
 import info.skyblond.fediverse.toot.trans.filter.TootFilter
+import info.skyblond.fediverse.toot.trans.llm.client.ChatApiException
+import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
+import info.skyblond.fediverse.toot.trans.llm.client.ChatCompletionRequest
+import info.skyblond.fediverse.toot.trans.llm.client.ChatMessage
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
+import info.skyblond.fediverse.toot.trans.llm.client.RetryingChatClient
+import info.skyblond.fediverse.toot.trans.llm.client.firstChoiceText
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
@@ -19,6 +26,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.jupiter.api.io.TempDir
@@ -34,6 +42,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 class AppModuleTest {
@@ -57,11 +66,20 @@ class AppModuleTest {
         backoffFallbackDelay: Duration? = null,
         backoffMaxWaitDuration: Duration? = null,
         initialScanSize: Int? = null,
-        scanTransientMaxRetry: Int? = null,
-        scanTransientRetryDelay: Duration? = null,
+        transientMaxRetry: Int? = null,
+        transientRetryDelay: Duration? = null,
         targetLanguage: String? = null,
         targetLangCode: String? = null,
         translationCooldown: Duration? = null,
+        llmBaseUrl: String? = null,
+        llmApiKey: String? = null,
+        llmConnectTimeout: Duration? = null,
+        llmReadTimeout: Duration? = null,
+        llmWriteTimeout: Duration? = null,
+        llmModel: String? = null,
+        llmMaxCompletionTokens: Int? = null,
+        llmReasoningEffort: ReasoningEffort? = null,
+        llmReqExtra: JsonObject? = null,
     ): ConfigStore = ConfigStore(
         listOf(
             object : ConfigProvider {
@@ -74,11 +92,20 @@ class AppModuleTest {
                 override val backoffFallbackDelay: Duration? = backoffFallbackDelay
                 override val backoffMaxWaitDuration: Duration? = backoffMaxWaitDuration
                 override val initialScanSize: Int? = initialScanSize
-                override val scanTransientMaxRetry: Int? = scanTransientMaxRetry
-                override val scanTransientRetryDelay: Duration? = scanTransientRetryDelay
+                override val transientMaxRetry: Int? = transientMaxRetry
+                override val transientRetryDelay: Duration? = transientRetryDelay
                 override val targetLanguage: String? = targetLanguage
                 override val targetLangCode: String? = targetLangCode
                 override val translationCooldown: Duration? = translationCooldown
+                override val llmBaseUrl: String? = llmBaseUrl
+                override val llmApiKey: String? = llmApiKey
+                override val llmConnectTimeout: Duration? = llmConnectTimeout
+                override val llmReadTimeout: Duration? = llmReadTimeout
+                override val llmWriteTimeout: Duration? = llmWriteTimeout
+                override val llmModel: String? = llmModel
+                override val llmMaxCompletionTokens: Int? = llmMaxCompletionTokens
+                override val llmReasoningEffort: ReasoningEffort? = llmReasoningEffort
+                override val llmReqExtra: JsonObject? = llmReqExtra
             },
             DefaultConfigProvider(),
         )
@@ -108,7 +135,12 @@ class AppModuleTest {
 
     @Test
     fun `resolves the whole graph with a complete config`() {
-        val app = appWith(configWith(mastoHost = testHost, accessToken = testToken, targetLangCode = "en"))
+        val app = appWith(
+            configWith(
+                mastoHost = testHost, accessToken = testToken, targetLangCode = "en",
+                llmBaseUrl = "https://llm.example/v1", llmApiKey = "llm-key",
+            )
+        )
         try {
             // interface definitions point at the OkHttp implementations
             assertIs<OkHttpAccountsClient>(app.koin.get<AccountsClient>())
@@ -124,6 +156,10 @@ class AppModuleTest {
             // and backoff singles with the pool
             assertIs<StatusesDeleter>(app.koin.get<StatusesDeleter>())
             app.koin.get<TootFilter>()
+            // its construction performs no IO either, so a complete
+            // config must resolve it too (the wrapper type is pinned
+            // by the dedicated test below)
+            app.koin.get<ChatClient>()
 
             // CredentialAccount is left out here: its resolution performs
             // network IO, so it gets the dedicated MockWebServer-backed
@@ -374,6 +410,233 @@ class AppModuleTest {
             assertIs<TootFilter>(app.koin.get<TootFilter>())
         } finally {
             app.close()
+        }
+    }
+
+    @Test
+    fun `resolves the chat client as the retrying transport`() {
+        val app = appWith(
+            configWith(
+                mastoHost = testHost, accessToken = testToken,
+                llmBaseUrl = "https://llm.example/v1", llmApiKey = "llm-key",
+            )
+        )
+        try {
+            assertIs<RetryingChatClient>(app.koin.get<ChatClient>())
+        } finally {
+            app.close()
+        }
+    }
+
+    @Test
+    fun `missing LLM config fails chat client resolution`() {
+        // the base URL and key are read while the client is built; neither
+        // is configured here
+        val app = appWith(configWith(mastoHost = testHost, accessToken = testToken))
+        try {
+            val error = assertFailsFast { app.koin.get<ChatClient>() }
+            assertIs<MissingConfigException>(error)
+            assertTrue(error.message!!.contains("llm base url"))
+        } finally {
+            app.close()
+        }
+    }
+
+    /**
+     * A typo'd base URL must fail naming the setting, not with the
+     * transport's own "Base URL" wording; the endpoint-shape cases
+     * (query, fragment, endpoint duplication) stay with the transport,
+     * see `OkHttpChatClient`'s KDoc.
+     * */
+    @Test
+    fun `malformed llm base url fails chat client resolution naming the setting`() {
+        val app = appWith(
+            configWith(
+                mastoHost = testHost, accessToken = testToken,
+                llmBaseUrl = "not a url", llmApiKey = "llm-key",
+            )
+        )
+        try {
+            val error = assertIs<IllegalArgumentException>(assertFailsFast { app.koin.get<ChatClient>() })
+            assertTrue(error.message!!.contains("llmBaseUrl"), "error must name llmBaseUrl: ${error.message}")
+        } finally {
+            app.close()
+        }
+    }
+
+    /**
+     * One case per timeout setting, for both rejected value kinds
+     * (negative and infinite): the shared client would resolve with
+     * OkHttp's defaults, so dropping an argument from the module would
+     * leave its case resolving instead of failing. The error must name
+     * the setting, not OkHttp's own parameter-named failure.
+     * */
+    @Test
+    fun `negative and infinite llm timeouts fail chat client resolution`() {
+        for (bad in listOf((-1).seconds, Duration.INFINITE)) {
+            val cases = mapOf(
+                "llmConnectTimeout" to configWith(
+                    mastoHost = testHost, accessToken = testToken, llmBaseUrl = "https://llm.example/v1",
+                    llmApiKey = "llm-key", llmConnectTimeout = bad,
+                ),
+                "llmReadTimeout" to configWith(
+                    mastoHost = testHost, accessToken = testToken, llmBaseUrl = "https://llm.example/v1",
+                    llmApiKey = "llm-key", llmReadTimeout = bad,
+                ),
+                "llmWriteTimeout" to configWith(
+                    mastoHost = testHost, accessToken = testToken, llmBaseUrl = "https://llm.example/v1",
+                    llmApiKey = "llm-key", llmWriteTimeout = bad,
+                ),
+            )
+            for ((setting, config) in cases) {
+                val app = appWith(config)
+                try {
+                    val error = assertIs<IllegalArgumentException>(assertFailsFast { app.koin.get<ChatClient>() })
+                    assertTrue(error.message!!.contains(setting), "error must name $setting: ${error.message}")
+                } finally {
+                    app.close()
+                }
+            }
+        }
+    }
+
+    /**
+     * The accepting end of the timeout validation: zero is a legal
+     * timeout (OkHttp's "no timeout", see the README's `0s` disables),
+     * so a config with all three set to zero must resolve.
+     * */
+    @Test
+    fun `zero llm timeouts are accepted and disable the timeout`() {
+        val app = appWith(
+            configWith(
+                mastoHost = testHost, accessToken = testToken,
+                llmBaseUrl = "https://llm.example/v1", llmApiKey = "llm-key",
+                llmConnectTimeout = Duration.ZERO,
+                llmReadTimeout = Duration.ZERO,
+                llmWriteTimeout = Duration.ZERO,
+            )
+        )
+        try {
+            assertIs<RetryingChatClient>(app.koin.get<ChatClient>())
+        } finally {
+            app.close()
+        }
+    }
+
+    /**
+     * The shared transient* budget is validated in the module before it
+     * reaches the retry wrapper, whose own constructor errors name its
+     * parameters instead of the config setting — dropping the module
+     * validation would swap in that worse message. The `maxRetry + 1`
+     * attempt-budget conversion also means Int.MAX_VALUE must be
+     * rejected: the overflow would surface as a negative maxAttempts.
+     * */
+    @Test
+    fun `invalid transient retry config fails chat client resolution naming the setting`() {
+        val cases = listOf(
+            "transientMaxRetry" to configWith(
+                mastoHost = testHost, accessToken = testToken, llmBaseUrl = "https://llm.example/v1",
+                llmApiKey = "llm-key", transientMaxRetry = -1,
+            ),
+            "transientMaxRetry" to configWith(
+                mastoHost = testHost, accessToken = testToken, llmBaseUrl = "https://llm.example/v1",
+                llmApiKey = "llm-key", transientMaxRetry = Int.MAX_VALUE,
+            ),
+            "transientRetryDelay" to configWith(
+                mastoHost = testHost, accessToken = testToken, llmBaseUrl = "https://llm.example/v1",
+                llmApiKey = "llm-key", transientRetryDelay = Duration.ZERO,
+            ),
+        )
+        for ((setting, config) in cases) {
+            val app = appWith(config)
+            try {
+                val error = assertIs<IllegalArgumentException>(assertFailsFast { app.koin.get<ChatClient>() })
+                assertTrue(error.message!!.contains(setting), "error must name $setting: ${error.message}")
+            } finally {
+                app.close()
+            }
+        }
+    }
+
+    /**
+     * End-to-end wiring: the config's base URL and key reach the wire
+     * (endpoint appended to the base path, bearer auth), and the global
+     * transient config drives the retry budget — one retry is spent on
+     * the 500, then the second attempt succeeds. A dropped or off-by-one
+     * attempt budget would fail this test.
+     * */
+    @Test
+    fun `chat client posts through the derived endpoint and retries per the transient config`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueueJson(500, """{"error": "overloaded"}""")
+            server.enqueueJson(
+                200,
+                """{"choices": [{"message": {"role": "assistant", "content": "Hello"}, "finish_reason": "stop"}]}"""
+            )
+            val app = appWith(
+                configWith(
+                    mastoHost = testHost, accessToken = testToken,
+                    transientMaxRetry = 1, transientRetryDelay = 1.milliseconds,
+                    llmBaseUrl = server.url("/v1").toString(), llmApiKey = "llm-key",
+                )
+            )
+            try {
+                val response = runBlocking {
+                    app.koin.get<ChatClient>().complete(
+                        ChatCompletionRequest(model = "test-model", messages = listOf(ChatMessage.user("hi")))
+                    )
+                }
+
+                assertEquals("Hello", response.firstChoiceText())
+                assertEquals(2, server.requestCount)
+                repeat(2) {
+                    val recorded = server.takeRequest()
+                    assertEquals("POST", recorded.method)
+                    assertEquals("/v1/chat/completions", recorded.target)
+                    assertEquals("Bearer llm-key", recorded.headers["Authorization"])
+                }
+            } finally {
+                app.close()
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    /**
+     * The other end of the attempt-budget mapping: a zero transient
+     * retry budget means one attempt, so the 500 propagates untouched.
+     * */
+    @Test
+    fun `zero transient retry budget disables chat retries`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueueJson(500, """{"error": "overloaded"}""")
+            val app = appWith(
+                configWith(
+                    mastoHost = testHost, accessToken = testToken,
+                    transientMaxRetry = 0, transientRetryDelay = 1.milliseconds,
+                    llmBaseUrl = server.url("/v1").toString(), llmApiKey = "llm-key",
+                )
+            )
+            try {
+                val error = assertFailsWith<ChatApiException> {
+                    runBlocking {
+                        app.koin.get<ChatClient>().complete(
+                            ChatCompletionRequest(model = "test-model", messages = listOf(ChatMessage.user("hi")))
+                        )
+                    }
+                }
+                assertEquals(500, error.httpCode)
+                assertEquals(1, server.requestCount)
+            } finally {
+                app.close()
+            }
+        } finally {
+            server.close()
         }
     }
 }

@@ -1,7 +1,12 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.llm.client.ChatCompletionRequest
+import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
+import info.skyblond.fediverse.toot.trans.llm.client.RetryingChatClient
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
 
 /**
@@ -59,18 +64,19 @@ interface ConfigProvider {
     val initialScanSize: Int?
 
     /**
-     * Retry budget per page for transient failures (5xx, transport)
-     * during the boot-up scan; 0 disables such retries. The retry
-     * policy lives with the scan itself: see `performInitialScan`
-     * in `Scan.kt`.
+     * Retry budget for transient failures (5xx, transport), shared
+     * globally: the boot-up scan spends it per page and the LLM chat
+     * transport spends it as its attempt budget; 0 disables such
+     * retries. Each consumer's retry policy lives with the consumer:
+     * see `performInitialScan` in `Scan.kt` and [RetryingChatClient].
      * */
-    val scanTransientMaxRetry: Int?
+    val transientMaxRetry: Int?
 
     /**
-     * Spacing between the boot-up scan's transient retries, see
-     * `performInitialScan` in `Scan.kt`.
+     * Spacing between the transient retries, see [transientMaxRetry]
+     * for the consumers and their policies.
      * */
-    val scanTransientRetryDelay: Duration?
+    val transientRetryDelay: Duration?
 
     /**
      * Delay after creation/edit before a toot is eligible; zero disables it.
@@ -101,4 +107,76 @@ interface ConfigProvider {
      * For example, "en", "zh", "zh-CN".
      * */
     val targetLangCode: String?
+
+    /**
+     * API root of the OpenAI-compatible chat completions provider,
+     * for example `https://api.openai.com/v1`; the transport appends
+     * `/chat/completions`, see [OkHttpChatClient].
+     * */
+    val llmBaseUrl: String?
+
+    /**
+     * Bearer key for the chat completions provider. Secret: must
+     * never be logged.
+     * */
+    val llmApiKey: String?
+
+    /**
+     * Connect timeout of the LLM chat transport, applied to a client
+     * derived from the shared OkHttp client; 0 disables the timeout
+     * (OkHttp semantics). Defaults to
+     * [OkHttpChatClient.RECOMMENDED_CONNECT_TIMEOUT], whose KDoc
+     * explains the value.
+     * */
+    val llmConnectTimeout: Duration?
+
+    /**
+     * Read timeout of the LLM chat transport, same wiring as
+     * [llmConnectTimeout]. Defaults to
+     * [OkHttpChatClient.RECOMMENDED_READ_TIMEOUT], whose KDoc
+     * explains the value.
+     * */
+    val llmReadTimeout: Duration?
+
+    /**
+     * Write timeout of the LLM chat transport, same wiring as
+     * [llmConnectTimeout]. Defaults to
+     * [OkHttpChatClient.RECOMMENDED_WRITE_TIMEOUT], whose KDoc
+     * explains the value.
+     * */
+    val llmWriteTimeout: Duration?
+
+    /**
+     * Model ID sent with every chat completion, see
+     * [ChatCompletionRequest.model].
+     * */
+    val llmModel: String?
+
+    /**
+     * Upper bound on tokens generated per completion, including
+     * thinking tokens, see [ChatCompletionRequest.maxCompletionTokens].
+     * */
+    val llmMaxCompletionTokens: Int?
+
+    /**
+     * Reasoning depth sent with every chat completion, see
+     * [ReasoningEffort]; the value is one of the enum's names
+     * (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`),
+     * matched case-insensitively.
+     *
+     * Optional: null when no source configures it, and the field is
+     * then omitted from every request — the way to target providers
+     * that reject `reasoning_effort`, see
+     * [ChatCompletionRequest.reasoningEffort].
+     * */
+    val llmReasoningEffort: ReasoningEffort?
+
+    /**
+     * Provider-specific top-level body fields merged into every chat
+     * completion request, given as a JSON object (e.g.
+     * `{"temperature": 0.2}`); defaults to `{}` (no extra fields) when
+     * no source configures it. Keys owned by the client are rejected,
+     * see [ChatCompletionRequest.extra].
+     * */
+    val llmReqExtra: JsonObject?
 }

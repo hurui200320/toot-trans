@@ -4,7 +4,12 @@ import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.EnvConfigProvider
 import info.skyblond.fediverse.toot.trans.config.file.PropertiesConfigProvider
+import info.skyblond.fediverse.toot.trans.config.requireValidRetryDelay
+import info.skyblond.fediverse.toot.trans.config.requireValidTransientMaxRetry
 import info.skyblond.fediverse.toot.trans.filter.TootFilter
+import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
+import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
+import info.skyblond.fediverse.toot.trans.llm.client.RetryingChatClient
 import info.skyblond.fediverse.toot.trans.logger
 import info.skyblond.fediverse.toot.trans.masto.MastoApiClient
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
@@ -20,12 +25,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.onClose
 import org.koin.core.module.dsl.withOptions
 import org.koin.dsl.module
 import java.io.File
+import kotlin.time.Duration
+import kotlin.time.toJavaDuration
 
 /**
  * The Koin container's module: the whole application object graph.
@@ -101,6 +109,54 @@ fun appModule(config: ConfigStore): Module = module {
         TootFilter(get(), config.targetLangCode, config.translationCooldown)
     }
 
+    // the LLM chat client: the OkHttp transport (which owns no client,
+    // see [OkHttpChatClient]) wrapped in the transient-retry policy, so
+    // the graph's ChatClient is always the retrying one. The transport's
+    // OkHttp derives from the shared client via newBuilder: connection
+    // pool and threads stay shared, while the llm* timeouts apply to
+    // LLM traffic only — the instance API keeps OkHttp's defaults.
+    // Retries use the global transient* settings; maxAttempts counts the
+    // initial attempt while the config counts retries after it (0
+    // disables retries), hence the +1, see [RetryingChatClient].
+    single<ChatClient> {
+        val connectTimeout = config.llmConnectTimeout.checkHttpTimeout("llmConnectTimeout")
+        val readTimeout = config.llmReadTimeout.checkHttpTimeout("llmReadTimeout")
+        val writeTimeout = config.llmWriteTimeout.checkHttpTimeout("llmWriteTimeout")
+        // the transport owns the endpoint-shape checks (query, fragment,
+        // endpoint duplication, see [OkHttpChatClient]); this pre-check
+        // only makes the common typo name the setting instead of the
+        // transport's own "Base URL" wording
+        val baseUrl = config.llmBaseUrl
+        require(baseUrl.toHttpUrlOrNull() != null) {
+            "Config `llmBaseUrl` is not a valid URL, got `$baseUrl`"
+        }
+        // the transient validation runs through the predicates shared
+        // with the boot-up scan (see `config/Validation.kt`), naming the
+        // setting here where the components would only name their
+        // parameters
+        val maxRetry = requireValidTransientMaxRetry("Config `transientMaxRetry`", config.transientMaxRetry)
+        // the upper bound keeps the `maxRetry + 1` attempt-budget
+        // conversion below from overflowing, which would reach
+        // RetryingChatClient as a negative maxAttempts instead
+        require(maxRetry < Int.MAX_VALUE) {
+            "Config `transientMaxRetry` must be below ${Int.MAX_VALUE}, got $maxRetry"
+        }
+        val retryDelay = requireValidRetryDelay("Config `transientRetryDelay`", config.transientRetryDelay)
+        RetryingChatClient(
+            delegate = OkHttpChatClient(
+                baseUrl = baseUrl,
+                apiKey = config.llmApiKey,
+                httpClient = get<OkHttpClient>().newBuilder()
+                    .connectTimeout(connectTimeout.toJavaDuration())
+                    .readTimeout(readTimeout.toJavaDuration())
+                    .writeTimeout(writeTimeout.toJavaDuration())
+                    .build(),
+            ),
+            maxAttempts = maxRetry + 1,
+            retryDelay = retryDelay,
+        )
+    }
+
     // fetched from the instance with a blocking verify_credentials call
     // at first resolution: only resolve this bean from a thread that may
     // block on network IO — the main thread during startup, see Main.kt —
@@ -144,4 +200,17 @@ fun appConfigStore(
     val lang = config.targetLanguage
     val langCode = config.targetLangCode
     logger.info { "Configured target language: $lang ($langCode)" }
+}
+
+/**
+ * Validate a configured LLM HTTP timeout before it reaches OkHttp: fail-fast
+ * naming the setting instead of surfacing OkHttp's generic "timeout < 0".
+ * Zero is accepted — OkHttp treats it as "no timeout" — while an infinite
+ * duration cannot be converted for OkHttp at all.
+ * */
+private fun Duration.checkHttpTimeout(name: String): Duration {
+    require(isFinite() && !isNegative()) {
+        "Config `$name` must be finite and non-negative, got $this"
+    }
+    return this
 }

@@ -1,5 +1,7 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
+import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
 
 /**
@@ -38,11 +40,11 @@ class EnvConfigProvider(
     override val initialScanSize: Int?
         get() = int("INITIAL_SCAN_SIZE")
 
-    override val scanTransientMaxRetry: Int?
-        get() = int("SCAN_TRANSIENT_MAX_RETRY")
+    override val transientMaxRetry: Int?
+        get() = int("TRANSIENT_MAX_RETRY")
 
-    override val scanTransientRetryDelay: Duration?
-        get() = duration("SCAN_TRANSIENT_RETRY_DELAY")
+    override val transientRetryDelay: Duration?
+        get() = duration("TRANSIENT_RETRY_DELAY")
 
     override val translationCooldown: Duration?
         get() = duration("TRANSLATION_COOLDOWN")
@@ -53,6 +55,33 @@ class EnvConfigProvider(
     override val targetLangCode: String?
         get() = string("TARGET_LANG_CODE")
 
+    override val llmBaseUrl: String?
+        get() = string("LLM_BASE_URL")
+
+    override val llmApiKey: String?
+        get() = string("LLM_API_KEY")
+
+    override val llmConnectTimeout: Duration?
+        get() = duration("LLM_CONNECT_TIMEOUT")
+
+    override val llmReadTimeout: Duration?
+        get() = duration("LLM_READ_TIMEOUT")
+
+    override val llmWriteTimeout: Duration?
+        get() = duration("LLM_WRITE_TIMEOUT")
+
+    override val llmModel: String?
+        get() = string("LLM_MODEL")
+
+    override val llmMaxCompletionTokens: Int?
+        get() = int("LLM_MAX_COMPLETION_TOKENS")
+
+    override val llmReasoningEffort: ReasoningEffort?
+        get() = enumValue("LLM_REASONING_EFFORT")
+
+    override val llmReqExtra: JsonObject?
+        get() = jsonObject("LLM_REQ_EXTRA")
+
     private fun duration(name: String): Duration? =
         parseDurationConfig(name, env(name))
 
@@ -61,4 +90,10 @@ class EnvConfigProvider(
 
     private fun string(name: String): String? =
         parseStringConfig(env(name))
+
+    private inline fun <reified T : Enum<T>> enumValue(name: String): T? =
+        parseEnumConfig(name, env(name))
+
+    private fun jsonObject(name: String): JsonObject? =
+        parseJsonObjectConfig(name, env(name))
 }

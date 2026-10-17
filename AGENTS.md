@@ -38,8 +38,8 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 - `masto/statuses/StatusesDeleter.kt`: leaf-first deletion of obsolete
   translation segments, 429 backoff, and pool invalidation on success.
 - `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
-  chain, instance API transport, statuses pool, and the application
-  coroutine scope.
+  chain, instance API transport, statuses pool, the application
+  coroutine scope, and the LLM chat client.
 - `filter/TootFilter.kt`: basic, read-only eligibility selection, including
   the ancestor-translation prerequisite for reply chains.
 - `masto/statuses/ReplyChain.kt`: full ancestor qualification.

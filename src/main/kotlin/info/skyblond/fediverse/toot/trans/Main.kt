@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans
 import info.skyblond.fediverse.toot.trans.di.appConfigStore
 import info.skyblond.fediverse.toot.trans.di.appModule
 import info.skyblond.fediverse.toot.trans.filter.TootFilter
+import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
@@ -24,6 +25,8 @@ fun main() {
     Runtime.getRuntime().addShutdownHook(Thread { stopKoin() })
 
     try {
+        // placeholder here
+        val llmClient = koin.get<ChatClient>()
         val accountsClient = koin.get<AccountsClient>()
         val statusesPool = koin.get<StatusesPool>()
         val deleter = koin.get<StatusesDeleter>()
@@ -36,8 +39,8 @@ fun main() {
             val toots = performInitialScan(
                 accountsClient, statusesPool, account, config.initialScanSize,
                 rateLimitBackoff = rateLimitBackoff,
-                transientMaxRetry = config.scanTransientMaxRetry,
-                transientRetryDelay = config.scanTransientRetryDelay,
+                transientMaxRetry = config.transientMaxRetry,
+                transientRetryDelay = config.transientRetryDelay,
             )
 
             // TODO: filter is hidden states, we don't know if a toot is:

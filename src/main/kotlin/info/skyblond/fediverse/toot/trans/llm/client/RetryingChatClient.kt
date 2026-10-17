@@ -1,5 +1,6 @@
 package info.skyblond.fediverse.toot.trans.llm.client
 
+import info.skyblond.fediverse.toot.trans.config.requireValidRetryDelay
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.delay
 import java.io.IOException
@@ -42,9 +43,9 @@ class RetryingChatClient(
         require(maxAttempts >= 1) {
             "maxAttempts must be at least 1 (the initial attempt), got $maxAttempts"
         }
-        require(retryDelay.isFinite() && retryDelay.inWholeMilliseconds > 0) {
-            "retryDelay must be finite and at least 1ms, got $retryDelay"
-        }
+        // shared with the app's transient retry contract, see
+        // config/Validation.kt
+        requireValidRetryDelay("retryDelay", retryDelay)
     }
 
     override suspend fun complete(request: ChatCompletionRequest): ChatCompletionResponse {
@@ -81,17 +82,18 @@ class RetryingChatClient(
         private val logger = KotlinLogging.logger {}
 
         /**
-         * One initial attempt plus three retries. Built-in default for the
-         * constructor parameter, kept here so a future config provider can single-
-         * source the deploy default from the same constant, like the other
-         * tunables in this project.
+         * One initial attempt plus three retries. Programmatic default for the
+         * constructor parameter: the application container does not use it, it
+         * derives the attempt budget from the global transient retry budget
+         * instead (see `di/AppModule.kt`), so this constant only serves direct
+         * construction, tests included.
          * */
         const val DEFAULT_MAX_ATTEMPTS = 4
 
         /**
          * Fixed spacing between attempts; same order of magnitude as the boot-up
-         * scan's transient retry delay. Built-in default for the constructor
-         * parameter, same single-sourcing as [DEFAULT_MAX_ATTEMPTS].
+         * scan's transient retry delay. Programmatic default for the constructor
+         * parameter, same container override as [DEFAULT_MAX_ATTEMPTS].
          * */
         val DEFAULT_RETRY_DELAY: Duration = 10.seconds
     }

@@ -1,5 +1,7 @@
 package info.skyblond.fediverse.toot.trans
 
+import info.skyblond.fediverse.toot.trans.config.requireValidRetryDelay
+import info.skyblond.fediverse.toot.trans.config.requireValidTransientMaxRetry
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
@@ -51,10 +53,8 @@ suspend fun performInitialScan(
 ): List<Status> {
     require(size >= 0) { "size must be non-negative, got $size" }
     require(limit > 0) { "limit must be positive, got $limit" }
-    require(transientMaxRetry >= 0) { "transientMaxRetry must be non-negative, got $transientMaxRetry" }
-    require(transientRetryDelay.isFinite() && transientRetryDelay.inWholeMilliseconds > 0) {
-        "transientRetryDelay must be finite and at least 1ms"
-    }
+    requireValidTransientMaxRetry("transientMaxRetry", transientMaxRetry)
+    requireValidRetryDelay("transientRetryDelay", transientRetryDelay)
     if (size == 0) return emptyList()
 
     logger.info { "Performing initial scan for account ${account.username}: size=$size, pageLimit=$limit" }

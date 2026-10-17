@@ -3,10 +3,14 @@ package info.skyblond.fediverse.toot.trans.config
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
 import info.skyblond.fediverse.toot.trans.filter.TootFilter
+import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
+import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
+import kotlin.time.toKotlinDuration
 
 class DefaultConfigProvider : ConfigProvider {
     // required config, no default
@@ -30,11 +34,11 @@ class DefaultConfigProvider : ConfigProvider {
     // so it cannot drift apart either
     override val initialScanSize: Int = AccountsClient.GET_STATUSES_LIMIT
 
-    // optional, defaults for the scan's transient-failure retry policy,
+    // optional, defaults for the global transient-failure retry policy,
     // single-sourced in `Scan.kt`'s constants so they cannot drift
     // apart either
-    override val scanTransientMaxRetry: Int = DEFAULT_TRANSIENT_MAX_RETRY
-    override val scanTransientRetryDelay: Duration = DEFAULT_TRANSIENT_RETRY_DELAY
+    override val transientMaxRetry: Int = DEFAULT_TRANSIENT_MAX_RETRY
+    override val transientRetryDelay: Duration = DEFAULT_TRANSIENT_RETRY_DELAY
 
     override val translationCooldown: Duration = TootFilter.DEFAULT_COOLDOWN
 
@@ -43,4 +47,25 @@ class DefaultConfigProvider : ConfigProvider {
 
     // required config, no default
     override val targetLangCode: String? = null
+
+    // required LLM config, no default
+    override val llmBaseUrl: String? = null
+    override val llmApiKey: String? = null
+    override val llmModel: String? = null
+    override val llmMaxCompletionTokens: Int? = null
+
+    // optional: the empty object means no provider-specific request
+    // fields, see [ConfigProvider.llmReqExtra]
+    override val llmReqExtra: JsonObject = JsonObject(emptyMap())
+
+    // optional: null means the request omits `reasoning_effort` entirely,
+    // see [ConfigProvider.llmReasoningEffort]
+    override val llmReasoningEffort: ReasoningEffort? = null
+
+    // optional, defaults are the transport's recommended LLM timeouts,
+    // single-sourced from [OkHttpChatClient]'s companion so they cannot
+    // drift apart either
+    override val llmConnectTimeout: Duration = OkHttpChatClient.RECOMMENDED_CONNECT_TIMEOUT.toKotlinDuration()
+    override val llmReadTimeout: Duration = OkHttpChatClient.RECOMMENDED_READ_TIMEOUT.toKotlinDuration()
+    override val llmWriteTimeout: Duration = OkHttpChatClient.RECOMMENDED_WRITE_TIMEOUT.toKotlinDuration()
 }
