@@ -2,11 +2,11 @@ package info.skyblond.fediverse.toot.trans.config
 
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
-import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
@@ -40,7 +40,10 @@ class DefaultConfigProvider : ConfigProvider {
     override val transientMaxRetry: Int = DEFAULT_TRANSIENT_MAX_RETRY
     override val transientRetryDelay: Duration = DEFAULT_TRANSIENT_RETRY_DELAY
 
-    override val translationCooldown: Duration = TootFilter.DEFAULT_COOLDOWN
+    // optional, default single-sourced from [Cooldown]'s companion object
+    // so the deploy default cannot drift apart from the programmatic/test
+    // default
+    override val translationCooldown: Duration = Cooldown.DEFAULT_DURATION
 
     // required config, no default
     override val targetLanguage: String? = null

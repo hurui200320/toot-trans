@@ -4,9 +4,9 @@ import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.EnvConfigProvider
 import info.skyblond.fediverse.toot.trans.config.file.PropertiesConfigProvider
+import info.skyblond.fediverse.toot.trans.config.requireValidCooldown
 import info.skyblond.fediverse.toot.trans.config.requireValidRetryDelay
 import info.skyblond.fediverse.toot.trans.config.requireValidTransientMaxRetry
-import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.RetryingChatClient
@@ -18,6 +18,8 @@ import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccoun
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
+import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
+import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.CoroutineScope
@@ -98,15 +100,29 @@ fun appModule(config: ConfigStore): Module = module {
         )
     } withOptions { onClose { it?.close() } }
 
-    // deletes obsolete translation segments through the same client,
-    // dropping each deleted status from the pool; the shared backoff
-    // singleton paces its 429 retries like the pool worker and scan
-    single<StatusesDeleter> {
-        StatusesDeleter(get(), get(), get())
+    // the boot scan's work window: the account id comes from the resolved
+    // [CredentialAccount] (its own definition performs the network IO), the
+    // target language from config; the queue semantics live on
+    // [PendingQueue]
+    single<PendingQueue> {
+        val account: CredentialAccount = get()
+        PendingQueue(account.id, config.targetLangCode, get())
     }
 
-    single<TootFilter> {
-        TootFilter(get(), config.targetLangCode, config.translationCooldown)
+    // the translation cooldown policy; the config value is validated here
+    // through the predicate shared with [Cooldown]'s own constructor check
+    // (see `config/Validation.kt`), so a bad setting fails naming
+    // `translationCooldown` instead of the component's parameter name
+    single<Cooldown> {
+        Cooldown(requireValidCooldown("Config `translationCooldown`", config.translationCooldown))
+    }
+
+    // deletes obsolete translation segments through the same client,
+    // dropping each deleted status from the pool and the pending queue;
+    // the shared backoff singleton paces its 429 retries like the pool
+    // worker and scan
+    single<StatusesDeleter> {
+        StatusesDeleter(get(), get(), get())
     }
 
     // the LLM chat client: the OkHttp transport (which owns no client,

@@ -16,9 +16,16 @@ as to the code, they are already in English.
 
 ## Current implementation
 
-The application currently performs one startup scan, selects eligible
-originals, and reconstructs each original's existing translation chain from
-the scanned statuses (see `masto/statuses/TranslationChain.kt`).
+The application currently performs one startup scan, feeds the pending
+queue (`masto/statuses/PendingQueue.kt`), and reconstructs each original's
+existing translation chain from the queued statuses (see
+`masto/statuses/TranslationChain.kt`). The queue is the work window: `feed`
+runs the entrance filter, `next` hands out the oldest entry, and `drop`
+removes a processed one. Dropping the queue head records it as the rolling
+cursor, so a later incremental scan can resume right after it; entries still
+inside the cooldown stay queued, so the cursor never skips something
+unprocessed. Ordering is by creation time, which keeps every parent ahead of
+its replies.
 
 > Mastodon lists the owner's statuses newest-first by status ID (creation
 > order; edits do not reorder the listing). A translation reply is always
@@ -39,7 +46,8 @@ accepted (one-shot), the language scoping for deployments sharing one
 account, and the leaf-first deletion contract for invalid chains — are
 documented on `findTranslationChainState` in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/TranslationChain.kt`.
-The filter only decides eligibility; see `filter/TootFilter.kt`.
+The queue only decides what enters the work window; see
+`PendingQueue.feed` in `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/PendingQueue.kt`.
 
 ### Known limitations (current stage)
 
@@ -129,11 +137,12 @@ and the `backoff*` ones tune
 the 429 backoff policy shared by the pool's worker, the boot-up scan, and
 status deletion, so they all honor these settings.
 The `initialScanSize` setting controls how many of the owner's latest toots
-the boot-up scan fetches and feeds into the pool, and the `transient*` ones
-bound transient-failure retries (5xx and transport errors; 429 backoff is
-governed by the `backoff*` settings instead) globally: the boot-up scan uses
-them per page, and the LLM client's retry wrapper derives its attempt budget
-and fixed delay from them, see
+the boot-up scan fetches; the pending queue seeds the pool from the scan
+result and performs the entrance filter (see `PendingQueue.feed`).
+The `transient*` settings bound transient-failure retries globally (5xx and
+transport errors; 429 backoff is governed by the `backoff*` settings
+instead): the boot-up scan uses them per page, and the LLM client's retry
+wrapper derives its attempt budget and fixed delay from them, see
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`; the previous
 `scanTransient*` names are gone. For the LLM client this means one completion
 can spend up to `transientMaxRetry + 1` attempts (the initial attempt plus
@@ -176,8 +185,13 @@ timeouts which are finite and non-negative, where `0` disables the timeout;
 `transientMaxRetry` must be non-negative, where `0` disables the boot-up scan
 and transient retries respectively).
 
-The eligibility policy — the cooldown and the translated-ancestry
-prerequisite — is documented on `filter/TootFilter.kt`.
+The eligibility policy — the footered-reply/language/blank-body checks,
+the full reply-chain qualification, and the creation-time ordering — is
+documented on `PendingQueue.feed` in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/PendingQueue.kt`;
+the cooldown timing (`editedAt ?: createdAt`, checked against the fetch
+time) on `Cooldown` in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/Cooldown.kt`.
 `initialScanSize` limits the number of recent posts, not their age; there is
 no separate time cutoff.
 
@@ -229,10 +243,11 @@ Cache bypass still obeys the pool's batching and rate-limit handling.
 Account polling, status-source reads, and posting remain outside the pool.
 Deletion goes through `masto/statuses/StatusesDeleter.kt` instead of
 calling the HTTP client directly: it deletes leaf-first, honors the shared
-429 backoff, and calls `pool.invalidate` after every successful DELETE.
+429 backoff, and calls `pool.invalidate` plus `PendingQueue.drop` after
+every successful DELETE.
 The startup scan handles its own rate limits using the shared backoff
-policy; future posting flows must do the same. The filter does not invoke
-deletion.
+policy; future posting flows must do the same. The entrance filter does not
+invoke deletion.
 
 ## LLM client
 

@@ -2,15 +2,14 @@ package info.skyblond.fediverse.toot.trans
 
 import info.skyblond.fediverse.toot.trans.di.appConfigStore
 import info.skyblond.fediverse.toot.trans.di.appModule
-import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
+import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
-import info.skyblond.fediverse.toot.trans.masto.statuses.findTranslationChainState
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
 import org.koin.core.context.startKoin
@@ -28,29 +27,50 @@ fun main() {
         // placeholder here
         val llmClient = koin.get<ChatClient>()
         val accountsClient = koin.get<AccountsClient>()
-        val statusesPool = koin.get<StatusesCachePool>()
         val deleter = koin.get<StatusesDeleter>()
-        val filter = koin.get<TootFilter>()
         val account = koin.get<CredentialAccount>()
         val rateLimitBackoff = koin.get<RateLimitBackoff>()
+        val pendingQueue = koin.get<PendingQueue>()
+        val cooldown = koin.get<Cooldown>()
 
         runBlocking {
             // The scan shares the pool's backoff policy; see RateLimitBackoff.
-            val toots = performInitialScan(
-                accountsClient, statusesPool, account, config.initialScanSize,
+            // TODO: make this a scanner class
+            val fetches = performInitialScan(
+                accountsClient, account, config.initialScanSize,
                 rateLimitBackoff = rateLimitBackoff,
                 transientMaxRetry = config.transientMaxRetry,
                 transientRetryDelay = config.transientRetryDelay,
             )
 
-            // TODO: filter is hidden states, we don't know if a toot is:
-            //       a) don't need to translate, or b) we can't translate it now
-            //       no harm today but when we need to implement rolling,
-            //       we need this info to update the cursor (sinceId)
-            val pending = filter.filter(toots, account)
-            logger.info { "Eligible originals: ${pending.size}" }
-            pending.forEach { toot ->
-                when (val state = findTranslationChainState(toot.id, toots, config.targetLangCode)) {
+            pendingQueue.feed(fetches)
+
+            while (pendingQueue.hasNext()) {
+                val fetched = pendingQueue.next()
+                val toot = fetched.status
+
+                // skip translation toots
+                if (pendingQueue.isTranslation(toot.id)) {
+                    pendingQueue.drop(toot.id)
+                    continue
+                }
+
+                // check cooldown
+                if (!cooldown.checkCooldown(fetched)) {
+                    // skip and wait for the next round of scan
+                    // but must ensure we have cursor ready
+                    // if not, drop the current toot and make it the cursor
+                    // TODO: the normal scan should require the cursor
+                    //       and use it as sinceId, and all the way to head
+                    if (pendingQueue.cursor() == null) {
+                        logger.warn { "Dropping toot ${toot.id} as cursor is null" }
+                        pendingQueue.drop(toot.id)
+                    }
+                    break
+                }
+
+                // check translation state
+                when (val state = pendingQueue.findTranslationChainState(toot)) {
                     is TranslationChainState.Translated -> logger.info {
                         "Already translated: id=${toot.id}, segments=${state.chain.segments.size}"
                     }
@@ -72,7 +92,15 @@ fun main() {
                         }
                     }
                 }
+
+                // TODO: any error that should be retried should break the loop
+                //       so the head is not dropped and will be re-processed on next loop
+
+                // finished
+                pendingQueue.drop(toot.id)
             }
+
+            logger.info { "Loop finished, actual loop-and-scan not implemented yet" }
         }
     } finally {
         stopKoin()

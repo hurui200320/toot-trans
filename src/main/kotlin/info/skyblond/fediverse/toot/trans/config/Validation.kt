@@ -31,3 +31,18 @@ fun requireValidTransientMaxRetry(name: String, value: Int): Int {
     require(value >= 0) { "$name must be non-negative, got $value" }
     return value
 }
+
+/**
+ * Shared predicate of the translation cooldown contract: the cooldown
+ * must be finite and non-negative, where 0 disables it (except for
+ * future timestamps, see `Cooldown` in
+ * `masto/statuses/Cooldown.kt`). Consumers: `Cooldown`'s constructor,
+ * so a programmatic value fails at the component, and `di/AppModule.kt`,
+ * so a config value fails naming the setting.
+ * */
+fun requireValidCooldown(name: String, value: Duration): Duration {
+    require(value.isFinite() && !value.isNegative()) {
+        "$name must be finite and non-negative, got $value"
+    }
+    return value
+}

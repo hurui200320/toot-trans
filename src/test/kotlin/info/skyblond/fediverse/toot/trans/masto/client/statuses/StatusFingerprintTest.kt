@@ -1,4 +1,4 @@
-package info.skyblond.fediverse.toot.trans.filter
+package info.skyblond.fediverse.toot.trans.masto.client.statuses
 
 import info.skyblond.fediverse.toot.trans.llm.Footer
 import info.skyblond.fediverse.toot.trans.masto.statuses.now

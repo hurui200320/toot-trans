@@ -6,7 +6,7 @@ import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
-import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.FetchedStatus
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.delay
 import java.io.IOException
@@ -16,12 +16,12 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * Perform the first scan after boot up: fetch the latest [size] toots
  * of [account] (newest first, page by page via [limit]) and return them
- * in old-to-new order, also feeding them into [statusesPool].
+ * in old-to-new order.
  *
- * Each page is seeded into the pool as it arrives, so new stuff is fed
- * before old stuff: we process from old to new, and if the seeding
- * triggers cache eviction, the old toots (which will be processed
- * first) are preserved.
+ * Each returned entry carries the instant its page fetch was issued
+ * ([FetchedStatus.fetchedAt]), which the cooldown check uses; no status
+ * is seeded into the pool here — that is `PendingQueue.feed`'s job, so
+ * there is a single place that feeds the pool.
  *
  * Page fetches survive transient failure, retrying the identical
  * page: a 429 waits out the instance's reset via [rateLimitBackoff]
@@ -43,14 +43,13 @@ import kotlin.time.Duration.Companion.seconds
  * */
 suspend fun performInitialScan(
     accountsClient: AccountsClient,
-    statusesPool: StatusesCachePool,
     account: CredentialAccount,
     size: Int,
     limit: Int = AccountsClient.GET_STATUSES_LIMIT,
     rateLimitBackoff: RateLimitBackoff = RateLimitBackoff(),
     transientMaxRetry: Int = DEFAULT_TRANSIENT_MAX_RETRY,
     transientRetryDelay: Duration = DEFAULT_TRANSIENT_RETRY_DELAY,
-): List<Status> {
+): List<FetchedStatus> {
     require(size >= 0) { "size must be non-negative, got $size" }
     require(limit > 0) { "limit must be positive, got $limit" }
     requireValidTransientMaxRetry("transientMaxRetry", transientMaxRetry)
@@ -61,7 +60,7 @@ suspend fun performInitialScan(
 
     var fetchedCount = 0
     var lastId: String? = null
-    val result = ArrayList<Status>(size)
+    val result = ArrayList<FetchedStatus>(size)
     while (fetchedCount < size) {
         val roundLimit = minOf(size - fetchedCount, limit)
 
@@ -72,9 +71,8 @@ suspend fun performInitialScan(
 
         if (statuses.isEmpty()) break
         result.addAll(statuses)
-        statusesPool.seed(statuses)
         fetchedCount += statuses.size
-        lastId = statuses.last().id
+        lastId = statuses.last().status.id
 
         logger.info { "Fetched ${statuses.size} statuses, total $fetchedCount, goal $size" }
 
@@ -87,7 +85,7 @@ suspend fun performInitialScan(
     // the endpoint lists newest first, and edits must count as the toot
     // becoming current again (see the KDoc); stable sort keeps ties in
     // fetch order
-    return result.sortedBy { it.editedAt ?: it.createdAt }
+    return result.sortedBy { it.status.editedAt ?: it.status.createdAt }
 }
 
 /**
@@ -107,7 +105,7 @@ private suspend fun fetchPageWithRetry(
     rateLimitBackoff: RateLimitBackoff,
     transientMaxRetry: Int,
     transientRetryDelay: Duration,
-): List<Status> {
+): List<FetchedStatus> {
     var transientRetries = 0
     while (true) {
         try {

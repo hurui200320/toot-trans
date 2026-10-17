@@ -11,7 +11,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * Deletes statuses through [client], one at a time, and drops each
- * deleted (or already-gone) status from [pool].
+ * deleted (or already-gone) status from [pool] and [queue]. The queue
+ * drop keeps a deleted segment from lingering as chain material and
+ * from pinning the cursor, see [PendingQueue.drop].
  *
  * The deletion order is the caller's: [delete] removes exactly [segments]
  * in the given order, so the leaf-first `obsolete` list of
@@ -25,7 +27,7 @@ import kotlinx.coroutines.withContext
  * account by default, on top of the shared token and account buckets),
  * but request starts are not paced: like [StatusesCachePool]'s worker, a 429
  * waits for the instance's `X-RateLimit-Reset` via [rateLimitBackoff]
- * (see [info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff] for the wait computation) and then retries the
+ * (see [RateLimitBackoff] for the wait computation) and then retries the
  * same status, without bound — the instance says when we may proceed,
  * and fixed wall-clock windows make spacing requests save no budget.
  *
@@ -43,6 +45,7 @@ import kotlinx.coroutines.withContext
 class StatusesDeleter(
     private val client: StatusesClient,
     private val pool: StatusesCachePool,
+    private val queue: PendingQueue,
     private val rateLimitBackoff: RateLimitBackoff = RateLimitBackoff(),
 ) {
     private val logger = KotlinLogging.logger {}
@@ -89,6 +92,9 @@ class StatusesDeleter(
         logger.info { "Deleted status: id=$statusId" }
         // the status is gone on the instance either way, so a canceled
         // caller must not leave it cached here
-        withContext(NonCancellable) { pool.invalidate(statusId) }
+        withContext(NonCancellable) {
+            pool.invalidate(statusId)
+            queue.drop(statusId)
+        }
     }
 }

@@ -4,7 +4,6 @@ import info.skyblond.fediverse.toot.trans.config.ConfigProvider
 import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
-import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.ChatApiException
 import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ChatCompletionRequest
@@ -19,6 +18,8 @@ import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccoun
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
+import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
+import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.CancellationException
@@ -152,10 +153,10 @@ class AppModuleTest {
             // the shared backoff single: resolved by the pool above and,
             // like Main.kt does for the boot-up scan, directly too
             app.koin.get<RateLimitBackoff>()
-            // resolves; by Koin construction it shares the client, pool,
-            // and backoff singles with the pool
-            assertIs<StatusesDeleter>(app.koin.get<StatusesDeleter>())
-            app.koin.get<TootFilter>()
+            // the cooldown policy: construction performs no IO, so a
+            // complete config must resolve it too (the wrapper type is
+            // pinned by the dedicated test below)
+            app.koin.get<Cooldown>()
             // its construction performs no IO either, so a complete
             // config must resolve it too (the wrapper type is pinned
             // by the dedicated test below)
@@ -163,7 +164,9 @@ class AppModuleTest {
 
             // CredentialAccount is left out here: its resolution performs
             // network IO, so it gets the dedicated MockWebServer-backed
-            // tests below instead of the fake host above
+            // tests below instead of the fake host above; StatusesDeleter
+            // and PendingQueue depend on the resolved account and are
+            // covered there too
         } finally {
             app.close()
         }
@@ -188,7 +191,9 @@ class AppModuleTest {
      * [CredentialAccount] is the one graph node that does network IO
      * at resolution: the stand-in instance answers the call, and the
      * request count pins the single semantics — fetched exactly once,
-     * then served from the cache.
+     * then served from the cache. [PendingQueue] and [StatusesDeleter]
+     * depend on the resolved account and must reuse it without another
+     * call.
      * */
     @Test
     fun `resolves the credential account from the instance once`() {
@@ -196,7 +201,11 @@ class AppModuleTest {
         server.start()
         try {
             server.enqueueJson(200, """{"id": "14715", "username": "trwnh"}""")
-            val app = appWith(configWith(mastoHost = server.url("/").toString(), accessToken = testToken))
+            val app = appWith(
+                configWith(
+                    mastoHost = server.url("/").toString(), accessToken = testToken, targetLangCode = "en",
+                )
+            )
             try {
                 val account = app.koin.get<CredentialAccount>()
                 assertEquals("14715", account.id)
@@ -205,6 +214,11 @@ class AppModuleTest {
                 // the second resolution serves the cached single
                 // instead of calling the instance again
                 assertEquals(account, app.koin.get<CredentialAccount>())
+                // PendingQueue resolves on top of that cached account...
+                assertIs<PendingQueue>(app.koin.get<PendingQueue>())
+                // ...and StatusesDeleter shares the client, pool, backoff
+                // and queue singles with the pool built above
+                assertIs<StatusesDeleter>(app.koin.get<StatusesDeleter>())
                 assertEquals(1, server.requestCount)
             } finally {
                 app.close()
@@ -389,25 +403,28 @@ class AppModuleTest {
         assertTrue(e.message!!.contains("target language"))
     }
 
+    /**
+     * The cooldown single validates its config through the predicate
+     * shared with [Cooldown]'s own constructor check, so the error names
+     * `translationCooldown` instead of the component's parameter name.
+     * Zero is a legal cooldown (it disables the wait), so it must
+     * resolve.
+     * */
     @Test
-    fun `invalid cooldown fails filter resolution and zero is accepted`() {
+    fun `invalid cooldown fails cooldown resolution and zero is accepted`() {
         for (cooldown in listOf((-1).seconds, Duration.INFINITE)) {
-            val app = appWith(configWith(
-                mastoHost = testHost, accessToken = testToken, targetLangCode = "en", translationCooldown = cooldown,
-            ))
+            val app = appWith(configWith(translationCooldown = cooldown))
             try {
-                val error = assertFailsFast { app.koin.get<TootFilter>() }
+                val error = assertFailsFast { app.koin.get<Cooldown>() }
                 assertIs<IllegalArgumentException>(error)
                 assertTrue(error.message!!.contains("translationCooldown"))
             } finally {
                 app.close()
             }
         }
-        val app = appWith(configWith(
-            mastoHost = testHost, accessToken = testToken, targetLangCode = "en", translationCooldown = Duration.ZERO,
-        ))
+        val app = appWith(configWith(translationCooldown = Duration.ZERO))
         try {
-            assertIs<TootFilter>(app.koin.get<TootFilter>())
+            assertIs<Cooldown>(app.koin.get<Cooldown>())
         } finally {
             app.close()
         }

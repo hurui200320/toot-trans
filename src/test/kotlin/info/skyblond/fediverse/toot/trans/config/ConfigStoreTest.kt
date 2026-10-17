@@ -3,11 +3,11 @@ package info.skyblond.fediverse.toot.trans.config
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
-import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -481,7 +481,7 @@ class ConfigStoreTest {
             provider(), provider(translationCooldown = 0.seconds), provider(translationCooldown = 10.seconds),
         ))
         assertEquals(0.seconds, store.translationCooldown)
-        assertEquals(TootFilter.DEFAULT_COOLDOWN, ConfigStore(listOf(provider(), DefaultConfigProvider())).translationCooldown)
+        assertEquals(Cooldown.DEFAULT_DURATION, ConfigStore(listOf(provider(), DefaultConfigProvider())).translationCooldown)
     }
 
     @Test

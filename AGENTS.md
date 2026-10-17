@@ -36,18 +36,23 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 - `masto/statuses/StatusesCachePool.kt`: shared cached/batched lookups,
   lifecycle, cache bypass, and rate-limit retry semantics.
 - `masto/statuses/StatusesDeleter.kt`: leaf-first deletion of obsolete
-  translation segments, 429 backoff, and pool invalidation on success.
+  translation segments, 429 backoff, and pool/queue invalidation on success.
+- `masto/statuses/PendingQueue.kt`: the translation work window: entrance
+  eligibility (basic checks plus full reply-chain qualification), the
+  creation-ordered queue, and the rolling cursor.
+- `masto/statuses/Cooldown.kt`: the fetched-at cooldown policy (effective
+  time `editedAt ?: createdAt`); single-sources the default cooldown.
 - `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
-  chain, instance API transport, statuses pool, the application
-  coroutine scope, and the LLM chat client.
-- `filter/TootFilter.kt`: basic, read-only eligibility selection, including
-  the ancestor-translation prerequisite for reply chains.
-- `masto/statuses/ReplyChain.kt`: full ancestor qualification.
+  chain, instance API transport, statuses pool, pending queue, cooldown,
+  the application coroutine scope, and the LLM chat client.
+- `filter/TootFilter.kt`: parked (deprecated, wired nowhere) reference for
+  the future ancestry-context stage. The runtime eligibility lives in
+  `PendingQueue.kt`.
 - `masto/statuses/TranslationChain.kt`: in-memory reconstruction and
   classification of an original's translation chain.
 - `masto/client/`: instance API wire layer over `MastoApiClient.kt`, split
   into `accounts/` and `statuses/`: contracts, OkHttp transports and the
-  wire models.
+  wire models (including `FetchedStatus`'s fetch timestamp).
 - `llm/client/ChatClient.kt`: stateless, non-streaming Chat Completions
   contract; entry point for the wire documentation.
 - `llm/client/OkHttpChatClient.kt`: direct transport: endpoint derivation,

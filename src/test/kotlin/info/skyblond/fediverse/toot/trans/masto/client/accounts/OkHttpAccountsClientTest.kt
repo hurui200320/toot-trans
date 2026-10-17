@@ -4,7 +4,9 @@ import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.MastoApiTestBase
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -13,10 +15,16 @@ import kotlin.test.assertNull
 class OkHttpAccountsClientTest : MastoApiTestBase() {
     private lateinit var client: OkHttpAccountsClient
 
+    /**
+     * Fixed fetch time for every page, so the cooldown input is
+     * deterministic.
+     * */
+    private val fetchedAt: Instant = Instant.parse("2026-10-16T12:00:00Z")
+
     // runs after the base class has started the server and built [api]
     @BeforeEach
     fun setUpClient() {
-        client = OkHttpAccountsClient(api)
+        client = OkHttpAccountsClient(api, Clock.fixed(fetchedAt, ZoneOffset.UTC))
     }
 
     @Test
@@ -82,7 +90,7 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
     }
 
     @Test
-    fun `getStatuses parses statuses and ignores unknown fields`() {
+    fun `getStatuses parses statuses stamps the fetch time and ignores unknown fields`() {
         // trimmed from https://docs.joinmastodon.org/entities/Status,
         // unknown fields included to prove they are ignored
         enqueueJson(
@@ -197,8 +205,10 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
         val statuses = runBlocking { client.getStatuses("14715", limit = 40) }
 
         assertEquals(2, statuses.size)
+        // every entry of the page carries the clock's fetch time
+        assertEquals(listOf(fetchedAt, fetchedAt), statuses.map { it.fetchedAt })
 
-        val first = statuses[0]
+        val first = statuses[0].status
         assertEquals("108880211901672326", first.id)
         assertEquals(Instant.parse("2022-08-24T22:29:46.493Z"), first.createdAt)
         assertNull(first.editedAt)
@@ -215,7 +225,7 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
         assertEquals("link", first.card?.type)
         assertNull(first.poll)
 
-        val second = statuses[1]
+        val second = statuses[1].status
         assertEquals("2222", second.id)
         assertEquals(Instant.parse("2026-10-15T02:00:00.000Z"), second.editedAt)
         assertEquals("1111", second.inReplyToId)

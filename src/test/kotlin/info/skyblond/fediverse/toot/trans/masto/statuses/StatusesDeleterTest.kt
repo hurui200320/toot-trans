@@ -23,6 +23,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
@@ -82,10 +83,27 @@ class StatusesDeleterTest {
             timeSource = scope.testScheduler.timeSource,
         )
 
+        fun queue(pool: StatusesCachePool) = PendingQueue(owner.id, "en", pool)
+
         fun deleter(
             pool: StatusesCachePool,
+            queue: PendingQueue,
             fallbackDelay: Duration = RateLimitBackoff.DEFAULT_FALLBACK_DELAY,
-        ) = StatusesDeleter(client, pool, rateLimitBackoff = backoff(fallbackDelay = fallbackDelay))
+        ) = StatusesDeleter(client, pool, queue, rateLimitBackoff = backoff(fallbackDelay = fallbackDelay))
+
+        /**
+         * Drain the work window in processing order (dropping each head),
+         * returning the ids still queued.
+         * */
+        suspend fun drainQueue(queue: PendingQueue): List<String> {
+            val ids = mutableListOf<String>()
+            while (queue.hasNext()) {
+                val head = queue.next()
+                ids.add(head.status.id)
+                queue.drop(head.status.id)
+            }
+            return ids
+        }
     }
 
     companion object {
@@ -99,12 +117,18 @@ class StatusesDeleterTest {
     fun `deletes in the given order and invalidates each deleted status`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
+        val queue = f.queue(pool)
         val segments = listOf(status("3"), status("2"), status("1"))
         pool.seed(segments)
+        queue.feed(segments.map { fetched(it) })
         // the instance no longer holds the deleted statuses
         f.client.fetch = { emptyList() }
 
-        f.deleter(pool).delete(segments)
+        // the queue is id-ordered, so "1" is the head: the first call drops
+        // only non-head entries and leaves the cursor unset
+        f.deleter(pool, queue).delete(listOf(status("3"), status("2")))
+        assertNull(queue.cursor())
+        f.deleter(pool, queue).delete(listOf(status("1")))
 
         assertEquals(listOf("3", "2", "1"), f.client.deleted.map { it.id })
         // the cache entries are gone: a lookup reaches the instance and finds nothing
@@ -114,19 +138,24 @@ class StatusesDeleterTest {
         runCurrent()
         assertNull(lookup.await())
         assertEquals(listOf(setOf("2")), f.client.fetched)
+        // the deleted statuses are also gone from the work window; the head
+        // drop ("1") recorded it as the cursor
+        assertFalse(queue.hasNext())
+        assertEquals("1", queue.cursor())
     }
 
     @Test
     fun `429 waits out the reset then retries the same status`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
+        val queue = f.queue(pool)
         f.client.delete = { id ->
             if (id == "2" && f.client.deleted.count { it.id == "2" } == 1) {
                 throw MastoApiException(429, "limited", "2026-10-15T00:00:05Z")
             }
         }
 
-        val done = async { f.deleter(pool).delete(listOf(status("3"), status("2"), status("1"))) }
+        val done = async { f.deleter(pool, queue).delete(listOf(status("3"), status("2"), status("1"))) }
         runCurrent()
         // "3" is deleted, then "2" hits the 429 at t=0
         assertEquals(listOf("3", "2"), f.client.deleted.map { it.id })
@@ -148,13 +177,14 @@ class StatusesDeleterTest {
     fun `unusable reset header falls back to the fixed delay`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
+        val queue = f.queue(pool)
         f.client.delete = { id ->
             if (f.client.deleted.count { it.id == id } == 1) {
                 throw MastoApiException(429, "limited", "not-a-date")
             }
         }
 
-        val done = async { f.deleter(pool, fallbackDelay = 2.seconds).delete(listOf(status("1"))) }
+        val done = async { f.deleter(pool, queue, fallbackDelay = 2.seconds).delete(listOf(status("1"))) }
         runCurrent()
         assertEquals(listOf(0L), f.client.deleted.map { it.at })
 
@@ -174,11 +204,14 @@ class StatusesDeleterTest {
         for (error in listOf(MastoApiException(500, "boom"), IOException("offline"))) {
             val f = Fixture(this)
             val pool = f.pool()
-            pool.seed(listOf(status("3"), status("2"), status("1")))
+            val queue = f.queue(pool)
+            val segments = listOf(status("3"), status("2"), status("1"))
+            pool.seed(segments)
+            queue.feed(segments.map { fetched(it) })
             f.client.delete = { id -> if (id == "2") throw error }
 
             val failure = assertFails {
-                f.deleter(pool).delete(listOf(status("3"), status("2"), status("1")))
+                f.deleter(pool, queue).delete(listOf(status("3"), status("2"), status("1")))
             }
 
             assertEquals(error::class, failure::class)
@@ -195,6 +228,10 @@ class StatusesDeleterTest {
             runCurrent()
             assertNull(lookup.await())
             assertEquals(listOf(setOf("3")), f.client.fetched)
+            // "3" left the work window via a non-head drop, so the cursor
+            // stayed unset; "2"/"1" stay queued for the next run
+            assertNull(queue.cursor())
+            assertEquals(listOf("1", "2"), f.drainQueue(queue))
         }
     }
 
@@ -202,12 +239,15 @@ class StatusesDeleterTest {
     fun `404 counts as already gone and continues the chain`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
-        pool.seed(listOf(status("3"), status("2"), status("1")))
+        val queue = f.queue(pool)
+        val segments = listOf(status("3"), status("2"), status("1"))
+        pool.seed(segments)
+        queue.feed(segments.map { fetched(it) })
         f.client.delete = { id ->
             if (id == "2") throw MastoApiException(404, "gone")
         }
 
-        f.deleter(pool).delete(listOf(status("3"), status("2"), status("1")))
+        f.deleter(pool, queue).delete(listOf(status("3"), status("2"), status("1")))
 
         // "2" is not retried and "1" is still deleted
         assertEquals(listOf("3", "2", "1"), f.client.deleted.map { it.id })
@@ -219,17 +259,21 @@ class StatusesDeleterTest {
         runCurrent()
         assertEquals(listOf(null, null, null), lookups.map { it.await() })
         assertEquals(listOf(setOf("3", "2", "1")), f.client.fetched)
+        // and from the work window too
+        assertFalse(queue.hasNext())
+        assertEquals("1", queue.cursor())
     }
 
     @Test
     fun `cancellation during backoff propagates and stops the chain`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
+        val queue = f.queue(pool)
         f.client.delete = { id ->
             if (id == "1") throw MastoApiException(429, "limited", "2026-10-15T00:01:00Z")
         }
 
-        val done = async { f.deleter(pool).delete(listOf(status("1"), status("2"))) }
+        val done = async { f.deleter(pool, queue).delete(listOf(status("1"), status("2"))) }
         runCurrent()
         assertEquals(listOf("1"), f.client.deleted.map { it.id })
 
@@ -247,12 +291,15 @@ class StatusesDeleterTest {
     fun `cancellation after a successful delete still invalidates the cache`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
-        pool.seed(listOf(status("1")))
+        val queue = f.queue(pool)
+        val segments = listOf(status("1"))
+        pool.seed(segments)
+        queue.feed(segments.map { fetched(it) })
         // the fake cancels the caller from inside the DELETE: the pending
         // cancellation surfaces at the next suspension point, which is the
         // invalidation itself
         val done = async(start = CoroutineStart.LAZY) {
-            f.deleter(pool).delete(listOf(status("1")))
+            f.deleter(pool, queue).delete(listOf(status("1")))
         }
         f.client.delete = { done.cancel() }
         done.start()
@@ -269,13 +316,16 @@ class StatusesDeleterTest {
         runCurrent()
         assertNull(lookup.await())
         assertEquals(listOf(setOf("1")), f.client.fetched)
+        // the NonCancellable drop ran too: the deleted status left the window
+        assertFalse(queue.hasNext())
     }
 
     @Test
     fun `blank ids fail fast before any deletion and empty input is a no-op`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
-        val deleter = f.deleter(pool)
+        val queue = f.queue(pool)
+        val deleter = f.deleter(pool, queue)
 
         assertFailsWith<IllegalArgumentException> {
             deleter.delete(listOf(status("1"), status("")))

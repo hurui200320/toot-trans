@@ -12,6 +12,19 @@ import java.time.Instant
 import java.util.zip.CRC32
 
 /**
+ * A [Status] together with the instant its fetch was issued, supplied by
+ * the client's injected [java.time.Clock]. The stamp is taken before the
+ * request goes out, and the instance generates the response at or after
+ * that instant, so a cooldown check against it can prove the version in
+ * hand is the settled one; see
+ * [info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown].
+ * */
+data class FetchedStatus(
+    val status: Status,
+    val fetchedAt: Instant
+)
+
+/**
  * A toot, with only the fields this project needs.
  *
  * [content] is rendered HTML; [spoilerText] is the content warning.
@@ -43,8 +56,9 @@ data class Status(
     /**
      * Checksum for reply footers: CRC32 over UTF-8 `spoilerText + "|" + content`,
      * with null fields treated as empty, rendered as eight uppercase hex chars.
-     * Uses rendered HTML, not `/source` composing text. The basic filter only
-     * checks footer presence and does not compare this checksum.
+     * Uses rendered HTML, not `/source` composing text. The entrance filter
+     * (`PendingQueue.feed`) only checks footer presence and does not compare
+     * this checksum.
      */
     fun crc32(): String {
         val crc = CRC32()
