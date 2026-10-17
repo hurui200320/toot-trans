@@ -85,6 +85,8 @@ fun main() {
                         }
 
                         // TODO: LLM translate and post. Currently use logging as placeholder
+                        //       First build the reply chain at a given limit,
+                        //       then search for valid translation chains for each of them with best efforts
                         logger.info {
                             "Pending translation: id=${toot.id}, " +
                                     "reason=${state.reason}, obsolete=${state.obsolete.size}, " +

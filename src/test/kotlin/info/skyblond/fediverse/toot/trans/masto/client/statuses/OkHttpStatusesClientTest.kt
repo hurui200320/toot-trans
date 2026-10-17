@@ -5,7 +5,9 @@ import info.skyblond.fediverse.toot.trans.masto.MastoApiTestBase
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.RecordedRequest
 import org.junit.jupiter.api.BeforeEach
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -18,10 +20,12 @@ import kotlin.test.assertTrue
 class OkHttpStatusesClientTest : MastoApiTestBase() {
     private lateinit var client: OkHttpStatusesClient
 
+    private val fetchedAt: Instant = Instant.parse("2026-10-16T12:00:00Z")
+
     // runs after the base class has started the server and built [api]
     @BeforeEach
     fun setUpClient() {
-        client = OkHttpStatusesClient(api)
+        client = OkHttpStatusesClient(api, Clock.fixed(fetchedAt, ZoneOffset.UTC))
     }
 
     // body is nullable in mockwebserver3; the requests we assert on
@@ -75,8 +79,10 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
     fun `getStatus parses the status and ignores unknown fields`() {
         enqueueJson(200, statusJson)
 
-        val status = runBlocking { client.getStatus("103254962155278888") }
+        val fetched = runBlocking { client.getStatus("103254962155278888") }
+        val status = fetched.status
 
+        assertEquals(fetchedAt, fetched.fetchedAt)
         assertEquals("103254962155278888", status.id)
         assertEquals(Instant.parse("2019-12-05T11:34:47.196Z"), status.createdAt)
         assertEquals("", status.spoilerText)
@@ -99,6 +105,23 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
     }
 
     @Test
+    fun `getStatus stamps the fetch time before the request goes out`() {
+        // the cooldown proof rests on the stamp preceding the request:
+        // the instance generates its response at or after the stamp
+        // (see FetchedStatus), so a stamp taken after the round trip
+        // could let a stale response pass as fresh
+        val clock = StampingClock(server, fetchedAt)
+        val stampingClient = OkHttpStatusesClient(api, clock)
+        enqueueJson(200, statusJson)
+
+        val fetched = runBlocking { stampingClient.getStatus("1") }
+
+        assertEquals(1, clock.readings)
+        assertEquals(0, clock.requestCountAtStamp, "the stamp must precede the request")
+        assertEquals(fetchedAt, fetched.fetchedAt)
+    }
+
+    @Test
     fun `getStatus parses RFC3339 dates with an offset form`() {
         // RFC3339 section 5.6 also allows +HH:MM instead of Z, and the
         // docs promise exactly that format:
@@ -117,7 +140,7 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
             """.trimIndent()
         )
 
-        val status = runBlocking { client.getStatus("108880211901672326") }
+        val status = runBlocking { client.getStatus("108880211901672326") }.status
 
         assertEquals(Instant.parse("2022-08-24T14:29:46.493Z"), status.createdAt)
         assertEquals(Instant.parse("2022-08-24T15:30:00Z"), status.editedAt)
@@ -126,11 +149,11 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
     @Test
     fun `status parses nonempty null and omitted spoiler text`() {
         enqueueJson(200, statusJson.replace("\"spoiler_text\": \"\"", "\"spoiler_text\": \"警告\""))
-        assertEquals("警告", runBlocking { client.getStatus("1") }.spoilerText)
+        assertEquals("警告", runBlocking { client.getStatus("1") }.status.spoilerText)
         enqueueJson(200, statusJson.replace("\"spoiler_text\": \"\"", "\"spoiler_text\": null"))
-        assertNull(runBlocking { client.getStatus("1") }.spoilerText)
+        assertNull(runBlocking { client.getStatus("1") }.status.spoilerText)
         enqueueJson(200, minimalStatusJson("1"))
-        assertNull(runBlocking { client.getStatus("1") }.spoilerText)
+        assertNull(runBlocking { client.getStatus("1") }.status.spoilerText)
     }
 
     @Test
@@ -192,10 +215,13 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
             """.trimIndent()
         )
 
-        val statuses = runBlocking {
+        val fetched = runBlocking {
             client.getStatuses(setOf("103254962155278888", "108880211901672326"))
         }
+        val statuses = fetched.map { it.status }
 
+        // one stamp per call, shared by every entry of the response
+        assertEquals(listOf(fetchedAt, fetchedAt), fetched.map { it.fetchedAt })
         assertEquals(2, statuses.size)
         assertEquals("103254962155278888", statuses[0].id)
         assertEquals("public", statuses[0].visibility)
@@ -216,6 +242,22 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
     }
 
     @Test
+    fun `getStatuses stamps the fetch time once before the request`() {
+        // each clock read returns a distinct instant, so a per-entry
+        // stamp would show up as different values, while the request
+        // count proves every read preceded the send
+        val clock = StampingClock(server, fetchedAt)
+        val stampingClient = OkHttpStatusesClient(api, clock)
+        enqueueJson(200, "[${minimalStatusJson("1")},${minimalStatusJson("2")}]")
+
+        val fetched = runBlocking { stampingClient.getStatuses(setOf("1", "2")) }
+
+        assertEquals(1, clock.readings)
+        assertEquals(0, clock.requestCountAtStamp, "the stamp must precede the request")
+        assertEquals(listOf(fetchedAt, fetchedAt), fetched.map { it.fetchedAt })
+    }
+
+    @Test
     fun `getStatuses returns fewer statuses when an id is unknown to the instance`() {
         // the instance silently omits missing or invisible statuses,
         // see StatusesClient.getStatuses
@@ -223,7 +265,7 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
 
         val statuses = runBlocking {
             client.getStatuses(setOf("103254962155278888", "missing"))
-        }
+        }.map { it.status }
 
         assertEquals(1, statuses.size)
         assertEquals("103254962155278888", statuses[0].id)
@@ -299,7 +341,7 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
         val statuses = runBlocking { client.getStatuses(ids.toSet()) }
 
         assertEquals(StatusesClient.MAX_IDS_PER_CALL, statuses.size)
-        assertEquals(ids, statuses.map { it.id })
+        assertEquals(ids, statuses.map { it.status.id })
     }
 
     @Test

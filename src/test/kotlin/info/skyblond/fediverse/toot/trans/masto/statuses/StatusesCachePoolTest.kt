@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.CreateStatusRequest
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.FetchedStatus
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusSource
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
@@ -43,14 +44,14 @@ class StatusesCachePoolTest {
 
     private class FakeClient(private val scope: TestScope) : StatusesClient {
         val calls = mutableListOf<Call>()
-        var fetch: suspend (Set<String>) -> List<Status> = { ids -> ids.map { status(it) } }
+        var fetch: suspend (Set<String>) -> List<FetchedStatus> = { ids -> ids.map { fetched(status(it)) } }
 
-        override suspend fun getStatuses(statusIds: Set<String>): List<Status> {
+        override suspend fun getStatuses(statusIds: Set<String>): List<FetchedStatus> {
             calls += Call(statusIds.toSet(), scope.testScheduler.currentTime)
             return fetch(statusIds)
         }
 
-        override suspend fun getStatus(statusId: String): Status = error("Must use batch endpoint")
+        override suspend fun getStatus(statusId: String): FetchedStatus = error("Must use batch endpoint")
         override suspend fun getStatusSource(statusId: String): StatusSource = error("Not used")
         override suspend fun createStatus(draft: CreateStatusRequest): Status = error("Not used")
         override suspend fun deleteStatus(statusId: String) = error("Not used")
@@ -108,9 +109,9 @@ class StatusesCachePoolTest {
         advanceTimeBy(100)
         runCurrent()
         assertEquals(listOf(Call(setOf("1", "2"), 1_000)), f.client.calls)
-        assertEquals(status("1"), first.await())
+        assertEquals(fetched(status("1")), first.await())
         assertEquals(first.await(), duplicate.await())
-        assertEquals(status("2"), second.await())
+        assertEquals(fetched(status("2")), second.await())
     }
 
     @Test
@@ -128,14 +129,14 @@ class StatusesCachePoolTest {
         assertEquals((1..45).map { it.toString() }, f.client.calls.flatMap { it.ids })
         assertEquals(List(3) { 1_000L }, f.client.calls.map { it.at })
         assertEquals(listOf(20, 20, 5), f.client.calls.map { it.ids.size })
-        assertEquals((1..45).map { status(it.toString()) }, results.map { it.await() })
+        assertEquals((1..45).map { fetched(status(it.toString())) }, results.map { it.await() })
     }
 
     @Test
     fun `late requests join an in flight lookup without concurrent HTTP calls`() = runTest {
         val f = Fixture(this)
         val gate = CompletableDeferred<Unit>()
-        f.client.fetch = { ids -> gate.await(); ids.map { status(it) } }
+        f.client.fetch = { ids -> gate.await(); ids.map { fetched(status(it)) } }
         val pool = f.pool()
         val first = async { pool.getStatus("1") }
         runCurrent()
@@ -149,9 +150,9 @@ class StatusesCachePoolTest {
         assertEquals(1, f.client.calls.size)
         gate.complete(Unit)
         runCurrent()
-        assertEquals(status("1"), first.await())
+        assertEquals(fetched(status("1")), first.await())
         assertEquals(first.await(), duplicate.await())
-        assertEquals(status("2"), other.await())
+        assertEquals(fetched(status("2")), other.await())
         assertEquals(listOf(1_000L, 6_000L), f.client.calls.map { it.at })
     }
 
@@ -159,18 +160,18 @@ class StatusesCachePoolTest {
     fun `cache expires after insertion even with repeated reads`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
-        pool.seed(listOf(status("1")))
+        pool.seed(listOf(fetched(status("1"))))
         advanceTimeBy(30_000)
-        assertEquals(status("1"), pool.getStatus("1"))
+        assertEquals(fetched(status("1")), pool.getStatus("1"))
         advanceTimeBy(29_999)
-        assertEquals(status("1"), pool.getStatus("1"))
+        assertEquals(fetched(status("1")), pool.getStatus("1"))
         advanceTimeBy(1)
         val refresh = async { pool.getStatus("1") }
         runCurrent()
         assertFalse(refresh.isCompleted)
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("1"), refresh.await())
+        assertEquals(fetched(status("1")), refresh.await())
         assertEquals(1, f.client.calls.size)
     }
 
@@ -178,29 +179,56 @@ class StatusesCachePoolTest {
     fun `LRU evicts least recently read entries`() = runTest {
         val f = Fixture(this)
         val pool = f.pool(maxCacheEntries = 2)
-        pool.seed(listOf(status("1"), status("2")))
-        assertEquals(status("1"), pool.getStatus("1"))
-        pool.seed(listOf(status("3")))
-        assertEquals(status("1"), pool.getStatus("1"))
-        assertEquals(status("3"), pool.getStatus("3"))
+        pool.seed(listOf(fetched(status("1")), fetched(status("2"))))
+        assertEquals(fetched(status("1")), pool.getStatus("1"))
+        pool.seed(listOf(fetched(status("3"))))
+        assertEquals(fetched(status("1")), pool.getStatus("1"))
+        assertEquals(fetched(status("3")), pool.getStatus("3"))
         val evicted = async { pool.getStatus("2") }
         runCurrent()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("2"), evicted.await())
+        assertEquals(fetched(status("2")), evicted.await())
         assertEquals(setOf("2"), f.client.calls.single().ids)
+    }
+
+    @Test
+    fun `dump snapshots the cache and includes lazily expired entries`() = runTest {
+        val f = Fixture(this)
+        val pool = f.pool()
+        pool.seed(listOf(fetched(status("1", "first")), fetched(status("2"))))
+
+        val snapshot = pool.dump()
+        assertEquals(
+            setOf(fetched(status("1", "first")), fetched(status("2"))),
+            snapshot.toSet(),
+        )
+
+        // later writes replace the cache, not an earlier snapshot
+        pool.seed(listOf(fetched(status("1", "second")), fetched(status("3"))))
+        assertEquals(
+            setOf(fetched(status("1", "first")), fetched(status("2"))),
+            snapshot.toSet(),
+        )
+
+        // the TTL elapses lazily, so dump still returns the expired entries
+        advanceTimeBy(60_001)
+        assertEquals(
+            setOf(fetched(status("1", "second")), fetched(status("2")), fetched(status("3"))),
+            pool.dump().toSet(),
+        )
     }
 
     @Test
     fun `missing and unordered results resolve by ID without caching missing statuses`() = runTest {
         val f = Fixture(this)
-        f.client.fetch = { listOf(status("3"), status("1")) }
+        f.client.fetch = { listOf(fetched(status("3")), fetched(status("1"))) }
         val pool = f.pool()
         val results = (1..3).map { async { pool.getStatus(it.toString()) } }
         runCurrent()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(listOf(status("1"), null, status("3")), results.map { it.await() })
+        assertEquals(listOf(fetched(status("1")), null, fetched(status("3"))), results.map { it.await() })
         val missing = async { pool.getStatus("2") }
         runCurrent()
         assertFalse(missing.isCompleted)
@@ -214,23 +242,25 @@ class StatusesCachePoolTest {
     fun `bypass skips cache and replaces stored values`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
-        pool.seed(listOf(status("1", "old")))
-        f.client.fetch = { listOf(status("1", "edited")) }
+        val editedAt = now.plusSeconds(30)
+        pool.seed(listOf(fetched(status("1", "old"))))
+        f.client.fetch = { listOf(fetched(status("1", "edited"), editedAt)) }
         val forced = async { pool.getStatus("1", bypassCache = true) }
         val missing = async { pool.getStatus("2") }
         runCurrent()
-        assertEquals(status("1", "old"), pool.getStatus("1"))
+        assertEquals(fetched(status("1", "old")), pool.getStatus("1"))
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("1", "edited"), forced.await())
+        // the forced fetch replaces the stored observation, its fetch time included
+        assertEquals(fetched(status("1", "edited"), editedAt), forced.await())
         assertNull(missing.await())
         assertEquals(forced.await(), pool.getStatus("1"))
-        f.client.fetch = { ids -> ids.map { status(it) } }
+        f.client.fetch = { ids -> ids.map { fetched(status(it)) } }
         val previouslyMissing = async { pool.getStatus("2") }
         runCurrent()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("2"), previouslyMissing.await())
+        assertEquals(fetched(status("2")), previouslyMissing.await())
         assertEquals(listOf(1_000L, 2_000L), f.client.calls.map { it.at })
     }
 
@@ -238,7 +268,7 @@ class StatusesCachePoolTest {
     fun `missing forced fetch removes stale cache without evicting other statuses`() = runTest {
         val f = Fixture(this)
         val pool = f.pool(maxCacheEntries = 2)
-        pool.seed(listOf(status("1"), status("2")))
+        pool.seed(listOf(fetched(status("1")), fetched(status("2"))))
         f.client.fetch = { emptyList() }
         val forced = async { pool.getStatus("1", bypassCache = true) }
         val missing = async { pool.getStatus("3") }
@@ -247,14 +277,14 @@ class StatusesCachePoolTest {
         runCurrent()
         assertNull(forced.await())
         assertNull(missing.await())
-        assertEquals(status("2"), pool.getStatus("2"))
-        f.client.fetch = { ids -> ids.map { status(it, "new") } }
+        assertEquals(fetched(status("2")), pool.getStatus("2"))
+        f.client.fetch = { ids -> ids.map { fetched(status(it, "new")) } }
         val fresh = async { pool.getStatus("1") }
         runCurrent()
         assertFalse(fresh.isCompleted)
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("1", "new"), fresh.await())
+        assertEquals(fetched(status("1", "new")), fresh.await())
         assertEquals(listOf(setOf("1", "3"), setOf("1")), f.client.calls.map { it.ids })
     }
 
@@ -263,10 +293,10 @@ class StatusesCachePoolTest {
         val f = Fixture(this)
         f.client.fetch = { ids ->
             if (f.client.calls.size == 1) throw MastoApiException(429, "limited", "2026-10-15T00:00:10Z")
-            ids.map { status(it) }
+            ids.map { fetched(status(it)) }
         }
         val pool = f.pool()
-        pool.seed(listOf(status("cached")))
+        pool.seed(listOf(fetched(status("cached"))))
         val first = async { pool.getStatus("1") }
         runCurrent()
         advanceTimeBy(1_000)
@@ -274,7 +304,7 @@ class StatusesCachePoolTest {
         val forced = async { pool.getStatus("cached", bypassCache = true) }
         val second = async { pool.getStatus("2") }
         runCurrent()
-        assertEquals(status("cached"), pool.getStatus("cached"))
+        assertEquals(fetched(status("cached")), pool.getStatus("cached"))
         advanceTimeBy(9_099)
         runCurrent()
         assertEquals(1, f.client.calls.size)
@@ -282,11 +312,11 @@ class StatusesCachePoolTest {
         assertFalse(forced.isCompleted)
         advanceTimeBy(1)
         runCurrent()
-        assertEquals(status("1"), first.await())
+        assertEquals(fetched(status("1")), first.await())
         assertEquals(10_800L, f.client.calls[1].at)
         runCurrent()
-        assertEquals(status("cached"), forced.await())
-        assertEquals(status("2"), second.await())
+        assertEquals(fetched(status("cached")), forced.await())
+        assertEquals(fetched(status("2")), second.await())
         // queued misses fire immediately after the backoff retry, no pacing
         assertEquals(10_800L, f.client.calls[2].at)
     }
@@ -297,7 +327,7 @@ class StatusesCachePoolTest {
             val f = Fixture(this)
             f.client.fetch = { ids ->
                 if (f.client.calls.size <= 4) throw MastoApiException(429, "limited", header)
-                ids.map { status(it) }
+                ids.map { fetched(status(it)) }
             }
             val pool = StatusesCachePool(
                 f.client, backgroundScope,
@@ -309,7 +339,7 @@ class StatusesCachePoolTest {
             runCurrent()
             advanceTimeBy(9_000)
             runCurrent()
-            assertEquals(status("1"), result.await())
+            assertEquals(fetched(status("1")), result.await())
             assertEquals(listOf(1_000L, 3_000L, 5_000L, 7_000L, 9_000L), f.client.calls.map { it.at - start })
             withContext(Dispatchers.IO) { pool.close() }
         }
@@ -320,14 +350,14 @@ class StatusesCachePoolTest {
         val f = Fixture(this)
         f.client.fetch = { ids ->
             if (f.client.calls.size == 1) throw MastoApiException(429, "limited", "2026-10-15T00:25:00Z")
-            ids.map { status(it) }
+            ids.map { fetched(status(it)) }
         }
         val pool = f.pool()
         val result = async { pool.getStatus("1") }
         runCurrent()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("1"), result.await())
+        assertEquals(fetched(status("1")), result.await())
         // 25:00:00 reset minus 00:00:01 now, plus the 800ms margin
         assertEquals(listOf(1_000L, 1_500_800L), f.client.calls.map { it.at })
     }
@@ -337,14 +367,14 @@ class StatusesCachePoolTest {
         val f = Fixture(this)
         f.client.fetch = { ids ->
             if (f.client.calls.size == 1) throw MastoApiException(429, "limited", "2026-10-15T01:00:00Z")
-            ids.map { status(it) }
+            ids.map { fetched(status(it)) }
         }
         val pool = f.pool()
         val result = async { pool.getStatus("1") }
         runCurrent()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("1"), result.await())
+        assertEquals(fetched(status("1")), result.await())
         // one-hour reset minus the call time, plus the 800ms margin
         assertEquals(listOf(1_000L, 3_600_800L), f.client.calls.map { it.at })
     }
@@ -354,7 +384,7 @@ class StatusesCachePoolTest {
         val f = Fixture(this)
         f.client.fetch = { ids ->
             if (f.client.calls.size == 1) throw MastoApiException(429, "limited", "2026-10-15T00:25:00Z")
-            ids.map { status(it) }
+            ids.map { fetched(status(it)) }
         }
         val pool = StatusesCachePool(
             f.client, backgroundScope,
@@ -365,7 +395,7 @@ class StatusesCachePoolTest {
         runCurrent()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("1"), result.await())
+        assertEquals(fetched(status("1")), result.await())
         assertEquals(listOf(1_000L, 3_000L), f.client.calls.map { it.at })
     }
 
@@ -386,12 +416,12 @@ class StatusesCachePoolTest {
                 assertEquals(error::class, failure!!::class)
                 assertEquals(error.message, failure.message)
             }
-            f.client.fetch = { ids -> ids.map { status(it) } }
+            f.client.fetch = { ids -> ids.map { fetched(status(it)) } }
             val retry = async { pool.getStatus("1") }
             runCurrent()
             advanceTimeBy(1_000)
             runCurrent()
-            assertEquals(status("1"), retry.await())
+            assertEquals(fetched(status("1")), retry.await())
             assertEquals(2, f.client.calls.size)
             withContext(Dispatchers.IO) { pool.close() }
         }
@@ -401,7 +431,7 @@ class StatusesCachePoolTest {
     fun `cancelling one caller does not cancel shared in flight work`() = runTest {
         val f = Fixture(this)
         val gate = CompletableDeferred<Unit>()
-        f.client.fetch = { ids -> gate.await(); ids.map { status(it) } }
+        f.client.fetch = { ids -> gate.await(); ids.map { fetched(status(it)) } }
         val pool = f.pool()
         val first = async { pool.getStatus("1") }
         val second = async { pool.getStatus("1") }
@@ -413,7 +443,7 @@ class StatusesCachePoolTest {
         assertFalse(second.isCompleted)
         gate.complete(Unit)
         runCurrent()
-        assertEquals(status("1"), second.await())
+        assertEquals(fetched(status("1")), second.await())
         assertEquals(1, f.client.calls.size)
     }
 
@@ -421,7 +451,10 @@ class StatusesCachePoolTest {
     fun `seed resolves in flight and queued lookups without stale responses overwriting it`() = runTest {
         val f = Fixture(this)
         val gate = CompletableDeferred<Unit>()
-        f.client.fetch = { ids -> gate.await(); ids.map { status(it, "old") } }
+        // the in-flight response, which loses to seed, carries an
+        // earlier fetch time: keeping it would show in the stamp too
+        val staleAt = now.minusSeconds(30)
+        f.client.fetch = { ids -> gate.await(); ids.map { fetched(status(it, "old"), staleAt) } }
         val pool = f.pool()
         val inFlight = async { pool.getStatus("1") }
         runCurrent()
@@ -429,14 +462,14 @@ class StatusesCachePoolTest {
         runCurrent()
         val queued = async { pool.getStatus("2") }
         runCurrent()
-        pool.seed(listOf(status("1", "new"), status("2", "new")))
-        assertEquals(status("1", "new"), inFlight.await())
-        assertEquals(status("2", "new"), queued.await())
+        pool.seed(listOf(fetched(status("1", "new")), fetched(status("2", "new"))))
+        assertEquals(fetched(status("1", "new")), inFlight.await())
+        assertEquals(fetched(status("2", "new")), queued.await())
         gate.complete(Unit)
         runCurrent()
         advanceTimeBy(2_000)
         runCurrent()
-        assertEquals(status("1", "new"), pool.getStatus("1"))
+        assertEquals(fetched(status("1", "new")), pool.getStatus("1"))
         assertEquals(1, f.client.calls.size)
     }
 
@@ -446,7 +479,7 @@ class StatusesCachePoolTest {
         val gate = CompletableDeferred<Unit>()
         f.client.fetch = { ids ->
             if (f.client.calls.size == 1) gate.await()
-            ids.map { status(it, if (f.client.calls.size == 1) "old" else "new") }
+            ids.map { fetched(status(it, if (f.client.calls.size == 1) "old" else "new")) }
         }
         val pool = f.pool()
         val old = async { pool.getStatus("1") }
@@ -461,7 +494,7 @@ class StatusesCachePoolTest {
         runCurrent()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(status("1", "new"), fresh.await())
+        assertEquals(fetched(status("1", "new")), fresh.await())
         assertEquals(fresh.await(), pool.getStatus("1"))
     }
 
@@ -473,7 +506,7 @@ class StatusesCachePoolTest {
                 // a reset within resetWait's sanity cap, so this mode
                 // stays on the reset-based backoff path
                 if (mode == "limited") throw MastoApiException(429, "limited", "2026-10-15T00:20:00Z")
-                CompletableDeferred<List<Status>>().await()
+                CompletableDeferred<List<FetchedStatus>>().await()
             }
             val pool = f.pool()
             val result = async { pool.getStatus("1") }
@@ -485,7 +518,7 @@ class StatusesCachePoolTest {
             withContext(Dispatchers.IO) { pool.close() }
             assertFailsWith<CancellationException> { result.await() }
             assertFailsWith<CancellationException> { pool.getStatus("2") }
-            assertFailsWith<CancellationException> { pool.seed(listOf(status("2"))) }
+            assertFailsWith<CancellationException> { pool.seed(listOf(fetched(status("2")))) }
             assertFailsWith<CancellationException> { pool.invalidate("2") }
         }
     }
@@ -564,15 +597,15 @@ class StatusesCachePoolTest {
     fun `pending queue accepts more than one thousand distinct misses and preserves FIFO and deduplication`() = runTest {
         val f = Fixture(this)
         val pool = f.pool()
-        pool.seed(listOf(status("cached")))
+        pool.seed(listOf(fetched(status("cached"))))
         val results = (1..1_005).map { async { pool.getStatus(it.toString()) } }
         val duplicate = async { pool.getStatus("1", bypassCache = true) }
         runCurrent()
-        assertEquals(status("cached"), pool.getStatus("cached"))
+        assertEquals(fetched(status("cached")), pool.getStatus("cached"))
         assertTrue(f.client.calls.isEmpty())
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals((1..1_005).map { status(it.toString()) }, results.map { it.await() })
+        assertEquals((1..1_005).map { fetched(status(it.toString())) }, results.map { it.await() })
         assertEquals(results.first().await(), duplicate.await())
         assertEquals((1..1_005).map { it.toString() }, f.client.calls.flatMap { it.ids })
         // all 51 batches fire as soon as the batch window elapses
@@ -586,7 +619,7 @@ class StatusesCachePoolTest {
         val pool = f.pool()
         assertFailsWith<IllegalArgumentException> { pool.getStatus(" ") }
         assertFailsWith<IllegalArgumentException> { pool.invalidate("") }
-        assertFailsWith<IllegalArgumentException> { pool.seed(listOf(status(""))) }
+        assertFailsWith<IllegalArgumentException> { pool.seed(listOf(fetched(status("")))) }
         val batchWindow = assertFailsWith<IllegalArgumentException> {
             StatusesCachePool(f.client, backgroundScope, batchWindow = 0.milliseconds)
         }
@@ -628,7 +661,7 @@ class StatusesCachePoolTest {
         assertTrue(f.client.calls.isEmpty())
         advanceTimeBy(1)
         runCurrent()
-        assertEquals(status("1"), first.await())
+        assertEquals(fetched(status("1")), first.await())
         assertEquals(61_000L, f.client.calls.single().at)
     }
 

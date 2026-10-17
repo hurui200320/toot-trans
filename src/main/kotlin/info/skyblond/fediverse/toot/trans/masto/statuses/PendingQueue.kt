@@ -98,7 +98,7 @@ class PendingQueue(
         statuses: List<FetchedStatus>
     ) {
         // feed into cache pool
-        cachePool.seed(statuses.map { it.status })
+        cachePool.seed(statuses)
         // filter and insert to pending queue
         statuses.forEach { fetched ->
             val status = fetched.status
@@ -211,6 +211,7 @@ class PendingQueue(
     suspend fun findTranslationChainState(
         status: Status
     ): TranslationChainState {
+        // TODO: merge with pool.dump(), pick the newest fetch on same id
         val statuses = mutex.withLock { toots.toList() }.map { it.status }
         return findTranslationChainState(status.id, statuses, targetLangCode)
     }
@@ -243,7 +244,7 @@ class PendingQueue(
             // detect infinite loop
             if (!visited.add(parentId)) return false
             // find next parent loop
-            current = cachePool.getStatus(parentId) ?: return false
+            current = cachePool.getStatus(parentId)?.status ?: return false
         }
     }
 }

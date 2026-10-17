@@ -252,6 +252,26 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
     }
 
     @Test
+    fun `getStatuses stamps the fetch time once before the request`() {
+        // each clock read returns a distinct instant, so a per-entry
+        // stamp would show up as different values, while the request
+        // count proves every read preceded the send
+        fun minimalStatusJson(id: String): String =
+            """{"id": "$id", "created_at": "2022-08-24T22:29:46.493Z", """ +
+                """"sensitive": false, "visibility": "public", "media_attachments": []}"""
+
+        val clock = StampingClock(server, fetchedAt)
+        val stampingClient = OkHttpAccountsClient(api, clock)
+        enqueueJson(200, "[${minimalStatusJson("1")},${minimalStatusJson("2")}]")
+
+        val fetched = runBlocking { stampingClient.getStatuses("14715", limit = 40) }
+
+        assertEquals(1, clock.readings)
+        assertEquals(0, clock.requestCountAtStamp, "the stamp must precede the request")
+        assertEquals(listOf(fetchedAt, fetchedAt), fetched.map { it.fetchedAt })
+    }
+
+    @Test
     fun `getStatuses returns an empty list when there are no statuses`() {
         enqueueJson(200, "[]")
 

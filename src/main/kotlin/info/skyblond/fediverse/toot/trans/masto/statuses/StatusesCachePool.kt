@@ -2,7 +2,7 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.FetchedStatus
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
@@ -26,7 +26,9 @@ import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
 /**
- * Shared, in-memory status lookups for one instance and access token.
+ * Shared, in-memory fetched-status lookups for one instance and access
+ * token. Every entry keeps its [FetchedStatus] fetch time, so callers receive
+ * the observation time alongside the status.
  *
  * Misses collect for [batchWindow] from the oldest queued request (not a
  * debounce). One worker calls [StatusesClient.getStatuses], at most
@@ -67,12 +69,12 @@ class StatusesCachePool(
 
     private val mutex = Mutex()
 
-    private class Cached(val status: Status, val insertedAt: TimeMark)
+    private class Cached(val fetched: FetchedStatus, val insertedAt: TimeMark)
 
     private val cache = LinkedHashMap<String, Cached>(16, 0.75f, true)
 
     private class Lookup(val queuedAt: TimeMark) {
-        val result = CompletableDeferred<Status?>()
+        val result = CompletableDeferred<FetchedStatus?>()
         var inFlight = false
     }
 
@@ -121,19 +123,20 @@ class StatusesCachePool(
     }
 
     /**
-     * Return a status, or null if unavailable to this token. [bypassCache]
-     * skips cached results, but still joins any
+     * Return a status with the instant it was fetched ([FetchedStatus]),
+     * or null if unavailable to this token. [bypassCache] skips cached
+     * results, but still joins any
      * queued/in-flight lookup for the ID and obeys batching and 429 backoff.
      * A successful forced fetch replaces the cached result; one that
      * finds the status gone removes the stale cached entry.
      */
-    suspend fun getStatus(statusId: String, bypassCache: Boolean = false): Status? {
+    suspend fun getStatus(statusId: String, bypassCache: Boolean = false): FetchedStatus? {
         require(statusId.isNotBlank()) { "statusId must not be blank" }
         val result = mutex.withLock {
             worker.ensureActive()
             if (!bypassCache) {
                 cache[statusId]?.let {
-                    if (it.insertedAt.elapsedNow() < cacheTtl) return it.status
+                    if (it.insertedAt.elapsedNow() < cacheTtl) return it.fetched
                     cache.remove(statusId)
                 }
             }
@@ -148,18 +151,30 @@ class StatusesCachePool(
     }
 
     /**
-     * Supply freshly fetched polling results or newly created statuses.
+     * Snapshot of every cached entry, for callers that reconcile the
+     * pool against another status source (e.g. merge by newest
+     * [FetchedStatus.fetchedAt] on the same ID). Entries whose TTL has
+     * elapsed are included too, because the cache expires lazily; later
+     * pool writes do not affect the returned list.
+     */
+    suspend fun dump(): List<FetchedStatus> = mutex.withLock {
+        cache.values.map { it.fetched }
+    }
+
+    /**
+     * Supply freshly fetched polling results or newly created statuses,
+     * each carrying the instant it was observed ([FetchedStatus]).
      * These replace cached values and satisfy outstanding lookups; an older
      * pool request still in flight cannot subsequently overwrite them.
      * Callers must supply current observations, not old cached snapshots.
      */
-    suspend fun seed(statuses: Collection<Status>) {
-        require(statuses.none { it.id.isBlank() }) { "statuses must not contain blank IDs" }
+    suspend fun seed(statuses: Collection<FetchedStatus>) {
+        require(statuses.none { it.status.id.isBlank() }) { "statuses must not contain blank IDs" }
         mutex.withLock {
             worker.ensureActive()
             statuses.forEach {
-                putCached(it.id, it)
-                pending.remove(it.id)?.result?.complete(it)
+                putCached(it)
+                pending.remove(it.status.id)?.result?.complete(it)
             }
         }
     }
@@ -193,8 +208,8 @@ class StatusesCachePool(
         }
     }
 
-    private fun putCached(id: String, status: Status) {
-        cache[id] = Cached(status, timeSource.markNow())
+    private fun putCached(fetched: FetchedStatus) {
+        cache[fetched.status.id] = Cached(fetched, timeSource.markNow())
         while (cache.size > maxCacheEntries) {
             cache.remove(cache.entries.first().key)
         }
@@ -222,12 +237,12 @@ class StatusesCachePool(
                     mutex.withLock { batch.filter { (id, lookup) -> pending[id] === lookup } }
                 if (active.isEmpty()) break
                 try {
-                    val statuses = client.getStatuses(active.keys).associateBy { it.id }
+                    val statuses = client.getStatuses(active.keys).associateBy { it.status.id }
                     mutex.withLock {
                         active.forEach { (id, lookup) ->
                             if (pending[id] === lookup) {
                                 val status = statuses[id]
-                                if (status != null) putCached(id, status) else cache.remove(id)
+                                if (status != null) putCached(status) else cache.remove(id)
                                 pending.remove(id)
                                 lookup.result.complete(status)
                             }

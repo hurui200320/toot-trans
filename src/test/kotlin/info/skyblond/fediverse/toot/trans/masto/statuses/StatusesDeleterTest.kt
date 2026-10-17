@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.CreateStatusRequest
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.FetchedStatus
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusSource
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
@@ -36,15 +37,15 @@ class StatusesDeleterTest {
     private class FakeClient(private val scope: TestScope) : StatusesClient {
         val deleted = mutableListOf<DeleteCall>()
         val fetched = mutableListOf<Set<String>>()
-        var fetch: suspend (Set<String>) -> List<Status> = { ids -> ids.map { status(it) } }
+        var fetch: suspend (Set<String>) -> List<FetchedStatus> = { ids -> ids.map { fetched(status(it)) } }
         var delete: suspend (String) -> Unit = { }
 
-        override suspend fun getStatuses(statusIds: Set<String>): List<Status> {
+        override suspend fun getStatuses(statusIds: Set<String>): List<FetchedStatus> {
             fetched += statusIds.toSet()
             return fetch(statusIds)
         }
 
-        override suspend fun getStatus(statusId: String): Status = error("Must use batch endpoint")
+        override suspend fun getStatus(statusId: String): FetchedStatus = error("Must use batch endpoint")
         override suspend fun getStatusSource(statusId: String): StatusSource = error("Not used")
         override suspend fun createStatus(draft: CreateStatusRequest): Status = error("Not used")
         override suspend fun deleteStatus(statusId: String) {
@@ -119,7 +120,7 @@ class StatusesDeleterTest {
         val pool = f.pool()
         val queue = f.queue(pool)
         val segments = listOf(status("3"), status("2"), status("1"))
-        pool.seed(segments)
+        pool.seed(segments.map { fetched(it) })
         queue.feed(segments.map { fetched(it) })
         // the instance no longer holds the deleted statuses
         f.client.fetch = { emptyList() }
@@ -206,7 +207,7 @@ class StatusesDeleterTest {
             val pool = f.pool()
             val queue = f.queue(pool)
             val segments = listOf(status("3"), status("2"), status("1"))
-            pool.seed(segments)
+            pool.seed(segments.map { fetched(it) })
             queue.feed(segments.map { fetched(it) })
             f.client.delete = { id -> if (id == "2") throw error }
 
@@ -219,8 +220,8 @@ class StatusesDeleterTest {
             // the chain stops at "2": "1" is never attempted
             assertEquals(listOf("3", "2"), f.client.deleted.map { it.id })
             // "2" and "1" are still cached; "3" was invalidated after its successful deletion
-            assertEquals(status("2"), pool.getStatus("2"))
-            assertEquals(status("1"), pool.getStatus("1"))
+            assertEquals(fetched(status("2")), pool.getStatus("2"))
+            assertEquals(fetched(status("1")), pool.getStatus("1"))
             f.client.fetch = { emptyList() }
             val lookup = async { pool.getStatus("3") }
             runCurrent()
@@ -241,7 +242,7 @@ class StatusesDeleterTest {
         val pool = f.pool()
         val queue = f.queue(pool)
         val segments = listOf(status("3"), status("2"), status("1"))
-        pool.seed(segments)
+        pool.seed(segments.map { fetched(it) })
         queue.feed(segments.map { fetched(it) })
         f.client.delete = { id ->
             if (id == "2") throw MastoApiException(404, "gone")
@@ -293,7 +294,7 @@ class StatusesDeleterTest {
         val pool = f.pool()
         val queue = f.queue(pool)
         val segments = listOf(status("1"))
-        pool.seed(segments)
+        pool.seed(segments.map { fetched(it) })
         queue.feed(segments.map { fetched(it) })
         // the fake cancels the caller from inside the DELETE: the pending
         // cancellation surfaces at the next suspension point, which is the

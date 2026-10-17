@@ -224,9 +224,10 @@ in the table above override those settings at deploy time.
 ```kotlin
 val pool = StatusesCachePool(statusesClient, applicationScope)
 try {
-    pool.seed(statusesFromAccountPolling)
-    val parent = pool.getStatus(parentId)
+    pool.seed(fetchedFromAccountPolling) // FetchedStatus values from polling/scan
+    val parent = pool.getStatus(parentId) // FetchedStatus?
     val refreshed = pool.getStatus(parentId, bypassCache = true)
+    val snapshot = pool.dump() // every cached FetchedStatus
     // After successfully deleting a status:
     pool.invalidate(deletedId)
 } finally {
@@ -238,8 +239,11 @@ In the application, Koin owns the pool and calls `close()` during teardown,
 on normal exit, or JVM shutdown (including Docker's SIGTERM). Closing cancels
 pending lookups and waits for worker cleanup; it does not drain requests.
 
-Lookups return `null` for statuses unavailable to the current token.
-Cache bypass still obeys the pool's batching and rate-limit handling.
+Lookups return `null` for statuses unavailable to the current token, and
+every returned value is a `FetchedStatus` — the status plus the instant it
+was fetched — so time-sensitive checks (e.g. the cooldown) run against the
+observation time. Cache bypass still obeys the pool's batching and
+rate-limit handling.
 Account polling, status-source reads, and posting remain outside the pool.
 Deletion goes through `masto/statuses/StatusesDeleter.kt` instead of
 calling the HTTP client directly: it deletes leaf-first, honors the shared

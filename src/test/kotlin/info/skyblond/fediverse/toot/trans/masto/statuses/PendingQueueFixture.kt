@@ -1,6 +1,7 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.CreateStatusRequest
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.FetchedStatus
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusSource
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
@@ -17,14 +18,16 @@ import kotlin.time.Duration.Companion.milliseconds
 internal class PendingQueueFixture(scope: TestScope, statuses: List<Status>) {
     val remote = statuses.associateBy { it.id }.toMutableMap()
     val lookups = mutableListOf<Set<String>>()
-    var fetch: suspend (Set<String>) -> List<Status> = { ids -> ids.mapNotNull(remote::get) }
+    var fetch: suspend (Set<String>) -> List<FetchedStatus> = { ids ->
+        ids.mapNotNull(remote::get).map { fetched(it) }
+    }
     val client = object : StatusesClient {
-        override suspend fun getStatuses(statusIds: Set<String>): List<Status> {
+        override suspend fun getStatuses(statusIds: Set<String>): List<FetchedStatus> {
             lookups.add(statusIds.toSet())
             return fetch(statusIds)
         }
         override suspend fun deleteStatus(statusId: String) = error("PendingQueue must not delete")
-        override suspend fun getStatus(statusId: String): Status = error("Use pool")
+        override suspend fun getStatus(statusId: String): FetchedStatus = error("Use pool")
         override suspend fun getStatusSource(statusId: String): StatusSource = error("Not this milestone")
         override suspend fun createStatus(draft: CreateStatusRequest): Status = error("Not this milestone")
     }

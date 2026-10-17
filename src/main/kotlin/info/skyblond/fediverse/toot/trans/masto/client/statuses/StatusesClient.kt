@@ -12,12 +12,18 @@ interface StatusesClient {
     /**
      * GET /api/v1/statuses/:statusId HTTP/1.1
      * https://docs.joinmastodon.org/methods/statuses/#get
+     *
+     * Returns the parsed status with the instant its fetch was issued,
+     * see [FetchedStatus].
      * */
-    suspend fun getStatus(statusId: String): Status
+    suspend fun getStatus(statusId: String): FetchedStatus
 
     /**
      * GET /api/v1/statuses HTTP/1.1
      * https://docs.joinmastodon.org/methods/statuses/#index
+     *
+     * Returns each parsed status with the instant its fetch was issued,
+     * see [FetchedStatus].
      *
      * The ids are sent as repeated `id[]` query parameters, e.g.
      * `?id[]=1&id[]=2`. At most [MAX_IDS_PER_CALL] ids per call:
@@ -30,7 +36,7 @@ interface StatusesClient {
      * be shorter than [statusIds], and its order is not guaranteed
      * to match [statusIds] either.
      * */
-    suspend fun getStatuses(statusIds: Set<String>): List<Status>
+    suspend fun getStatuses(statusIds: Set<String>): List<FetchedStatus>
 
     /**
      * GET /api/v1/statuses/:statusId/source HTTP/1.1
