@@ -121,7 +121,7 @@ consumes (`llmModel`, `llmMaxCompletionTokens`).
 | LLM reasoning effort | `LLM_REASONING_EFFORT` | `llmReasoningEffort` | No, unset omits the field | `medium` |
 | LLM request extra | `LLM_REQ_EXTRA` | `llmReqExtra` | No, default `{}` | `{"temperature": 0.2}` |
 
-The `pool*` settings tune `StatusesPool`; their batching and caching semantics
+The `pool*` settings tune `StatusesCachePool`; their batching and caching semantics
 are documented in its KDoc in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`,
 and the `backoff*` ones tune
@@ -201,7 +201,7 @@ targetLangCode=en
 
 ## Shared status lookups
 
-Use `StatusesPool` for status-by-ID reads instead of calling the HTTP client
+Use `StatusesCachePool` for status-by-ID reads instead of calling the HTTP client
 directly. Its KDoc in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`
 documents cache, batching, retry, and lifecycle settings. The `pool*` configs

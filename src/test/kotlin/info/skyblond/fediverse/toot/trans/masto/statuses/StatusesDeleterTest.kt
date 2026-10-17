@@ -72,14 +72,14 @@ class StatusesDeleterTest {
             clock = clock,
         )
 
-        fun pool() = StatusesPool(
+        fun pool() = StatusesCachePool(
             client, scope.backgroundScope,
             rateLimitBackoff = backoff(),
             timeSource = scope.testScheduler.timeSource,
         )
 
         fun deleter(
-            pool: StatusesPool,
+            pool: StatusesCachePool,
             fallbackDelay: Duration = RateLimitBackoff.DEFAULT_FALLBACK_DELAY,
         ) = StatusesDeleter(client, pool, rateLimitBackoff = backoff(fallbackDelay = fallbackDelay))
     }

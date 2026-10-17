@@ -5,7 +5,7 @@ import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.llm.client.RetryingChatClient
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
 
@@ -27,17 +27,17 @@ interface ConfigProvider {
     val accessToken: String?
 
     /**
-     * Miss collection window of the [StatusesPool], see its KDoc.
+     * Miss collection window of the [StatusesCachePool], see its KDoc.
      * */
     val poolBatchWindow: Duration?
 
     /**
-     * Insertion-based expiry of the [StatusesPool] cache, see its KDoc.
+     * Insertion-based expiry of the [StatusesCachePool] cache, see its KDoc.
      * */
     val poolCacheTtl: Duration?
 
     /**
-     * Entry limit of the [StatusesPool] LRU cache, see its KDoc.
+     * Entry limit of the [StatusesCachePool] LRU cache, see its KDoc.
      * */
     val poolMaxCacheEntries: Int?
 

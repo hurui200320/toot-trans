@@ -7,7 +7,7 @@ import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
 import kotlin.time.toKotlinDuration
@@ -22,9 +22,9 @@ class DefaultConfigProvider : ConfigProvider {
     // optional pool and backoff configs, defaults are single-sourced in
     // [StatusesPool]'s and [RateLimitBackoff]'s companion objects so
     // they cannot drift apart
-    override val poolBatchWindow: Duration = StatusesPool.DEFAULT_BATCH_WINDOW
-    override val poolCacheTtl: Duration = StatusesPool.DEFAULT_CACHE_TTL
-    override val poolMaxCacheEntries: Int = StatusesPool.DEFAULT_MAX_CACHE_ENTRIES
+    override val poolBatchWindow: Duration = StatusesCachePool.DEFAULT_BATCH_WINDOW
+    override val poolCacheTtl: Duration = StatusesCachePool.DEFAULT_CACHE_TTL
+    override val poolMaxCacheEntries: Int = StatusesCachePool.DEFAULT_MAX_CACHE_ENTRIES
     override val backoffResetMargin: Duration = RateLimitBackoff.DEFAULT_RESET_MARGIN
     override val backoffFallbackDelay: Duration = RateLimitBackoff.DEFAULT_FALLBACK_DELAY
     override val backoffMaxWaitDuration: Duration = RateLimitBackoff.DEFAULT_MAX_WAIT_DURATION

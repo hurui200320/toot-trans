@@ -51,7 +51,7 @@ import kotlin.time.TimeSource
  * Timing uses [timeSource] for elapsed durations, allowing deterministic
  * tests without wall-clock sleeps.
  */
-class StatusesPool(
+class StatusesCachePool(
     private val client: StatusesClient,
     scope: CoroutineScope,
     private val batchWindow: Duration = DEFAULT_BATCH_WINDOW,

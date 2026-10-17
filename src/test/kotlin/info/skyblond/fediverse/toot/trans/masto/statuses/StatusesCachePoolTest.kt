@@ -34,7 +34,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class StatusesPoolTest {
+class StatusesCachePoolTest {
     private data class Call(val ids: Set<String>, val at: Long)
 
     private class FakeClient(private val scope: TestScope) : StatusesClient {
@@ -75,7 +75,7 @@ class StatusesPoolTest {
             clock = clock,
         )
 
-        fun pool(maxCacheEntries: Int = 1_000) = StatusesPool(
+        fun pool(maxCacheEntries: Int = 1_000) = StatusesCachePool(
             client, scope.backgroundScope,
             maxCacheEntries = maxCacheEntries,
             rateLimitBackoff = backoff(),
@@ -295,7 +295,7 @@ class StatusesPoolTest {
                 if (f.client.calls.size <= 4) throw MastoApiException(429, "limited", header)
                 ids.map { status(it) }
             }
-            val pool = StatusesPool(
+            val pool = StatusesCachePool(
                 f.client, backgroundScope,
                 rateLimitBackoff = f.backoff(fallbackDelay = 2.seconds),
                 timeSource = testScheduler.timeSource,
@@ -352,7 +352,7 @@ class StatusesPoolTest {
             if (f.client.calls.size == 1) throw MastoApiException(429, "limited", "2026-10-15T00:25:00Z")
             ids.map { status(it) }
         }
-        val pool = StatusesPool(
+        val pool = StatusesCachePool(
             f.client, backgroundScope,
             rateLimitBackoff = f.backoff(fallbackDelay = 2.seconds, maxWaitDuration = 5.minutes),
             timeSource = testScheduler.timeSource,
@@ -490,7 +490,7 @@ class StatusesPoolTest {
     fun `immediate close releases queued lookups before returning`() = runTest {
         val f = Fixture(this)
         val parent = Job()
-        val pool = StatusesPool(
+        val pool = StatusesCachePool(
             f.client, CoroutineScope(parent + Dispatchers.Default),
             rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource,
         )
@@ -529,7 +529,7 @@ class StatusesPoolTest {
         }
         val parent = Job(backgroundScope.coroutineContext[Job])
         val scope = CoroutineScope(backgroundScope.coroutineContext + parent)
-        val pool = StatusesPool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
+        val pool = StatusesCachePool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
         val result = async { pool.getStatus("1") }
         runCurrent()
         advanceTimeBy(1_000)
@@ -584,27 +584,27 @@ class StatusesPoolTest {
         assertFailsWith<IllegalArgumentException> { pool.invalidate("") }
         assertFailsWith<IllegalArgumentException> { pool.seed(listOf(status(""))) }
         val batchWindow = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, batchWindow = 0.milliseconds)
+            StatusesCachePool(f.client, backgroundScope, batchWindow = 0.milliseconds)
         }
         assertTrue(batchWindow.message!!.contains("batchWindow"))
         val cacheTtl = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, cacheTtl = 0.milliseconds)
+            StatusesCachePool(f.client, backgroundScope, cacheTtl = 0.milliseconds)
         }
         assertTrue(cacheTtl.message!!.contains("cacheTtl"))
         val resetMargin = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(resetMargin = (-1).milliseconds))
+            StatusesCachePool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(resetMargin = (-1).milliseconds))
         }
         assertTrue(resetMargin.message!!.contains("resetMargin"))
         val fallbackDelay = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(fallbackDelay = 0.milliseconds))
+            StatusesCachePool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(fallbackDelay = 0.milliseconds))
         }
         assertTrue(fallbackDelay.message!!.contains("fallbackDelay"))
         val maxWaitDuration = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(maxWaitDuration = 0.seconds))
+            StatusesCachePool(f.client, backgroundScope, rateLimitBackoff = RateLimitBackoff(maxWaitDuration = 0.seconds))
         }
         assertTrue(maxWaitDuration.message!!.contains("maxWaitDuration"))
         val maxCacheEntries = assertFailsWith<IllegalArgumentException> {
-            StatusesPool(f.client, backgroundScope, maxCacheEntries = 0)
+            StatusesCachePool(f.client, backgroundScope, maxCacheEntries = 0)
         }
         assertTrue(maxCacheEntries.message!!.contains("maxCacheEntries"))
         assertTrue(f.client.calls.isEmpty())
@@ -633,7 +633,7 @@ class StatusesPoolTest {
         val f = Fixture(this)
         val parent = Job(backgroundScope.coroutineContext[Job])
         val scope = CoroutineScope(backgroundScope.coroutineContext + parent)
-        val pool = StatusesPool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
+        val pool = StatusesCachePool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
         val result = async { pool.getStatus("1") }
         runCurrent()
         parent.cancel()
@@ -648,7 +648,7 @@ class StatusesPoolTest {
         val f = Fixture(this)
         val parent = Job(backgroundScope.coroutineContext[Job])
         val scope = CoroutineScope(backgroundScope.coroutineContext + parent)
-        val pool = StatusesPool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
+        val pool = StatusesCachePool(f.client, scope, rateLimitBackoff = f.backoff(), timeSource = testScheduler.timeSource)
         val result = async(start = CoroutineStart.UNDISPATCHED) { pool.getStatus("1") }
         try {
             assertFalse(result.isCompleted)

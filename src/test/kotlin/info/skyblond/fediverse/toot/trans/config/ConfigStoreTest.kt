@@ -8,7 +8,7 @@ import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -342,9 +342,9 @@ class ConfigStoreTest {
             )
         )
 
-        assertEquals(StatusesPool.DEFAULT_BATCH_WINDOW, store.poolBatchWindow)
-        assertEquals(StatusesPool.DEFAULT_CACHE_TTL, store.poolCacheTtl)
-        assertEquals(StatusesPool.DEFAULT_MAX_CACHE_ENTRIES, store.poolMaxCacheEntries)
+        assertEquals(StatusesCachePool.DEFAULT_BATCH_WINDOW, store.poolBatchWindow)
+        assertEquals(StatusesCachePool.DEFAULT_CACHE_TTL, store.poolCacheTtl)
+        assertEquals(StatusesCachePool.DEFAULT_MAX_CACHE_ENTRIES, store.poolMaxCacheEntries)
     }
 
     @Test

@@ -13,7 +13,7 @@ import kotlin.time.Duration.Companion.seconds
  * Shared 429 backoff policy for this instance's API: turns a
  * rate-limited request into a wait duration. Callers on the same
  * token share the server's rate-limit buckets, so they back off
- * alike — currently [StatusesPool][info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool]'s
+ * alike — currently [StatusesPool][info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool]'s
  * worker and the boot-up scan (see `Scan.kt`).
  *
  * The wait follows the instance's `X-RateLimit-Reset` header, exposed

@@ -3,7 +3,7 @@ package info.skyblond.fediverse.toot.trans.filter
 import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooterFromContent
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.statuses.Status
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
 import info.skyblond.fediverse.toot.trans.masto.statuses.checkReplyChain
 import info.skyblond.fediverse.toot.trans.masto.statuses.findTranslationChainState
@@ -28,7 +28,7 @@ import kotlin.time.toJavaDuration
  * eligibility, see [filter].
  */
 class TootFilter(
-    private val pool: StatusesPool,
+    private val pool: StatusesCachePool,
     private val targetLangCode: String,
     private val cooldown: Duration = DEFAULT_COOLDOWN,
     private val clock: Clock = Clock.systemUTC(),

@@ -20,7 +20,7 @@ import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -147,7 +147,7 @@ class AppModuleTest {
             assertIs<OkHttpStatusesClient>(app.koin.get<StatusesClient>())
 
             // The container owns the worker and waits for it during teardown.
-            app.koin.get<StatusesPool>()
+            app.koin.get<StatusesCachePool>()
 
             // the shared backoff single: resolved by the pool above and,
             // like Main.kt does for the boot-up scan, directly too
@@ -251,7 +251,7 @@ class AppModuleTest {
         val app = appWith(configWith(mastoHost = testHost, accessToken = testToken))
         try {
             val scope = app.koin.get<CoroutineScope>()
-            val pool = app.koin.get<StatusesPool>()
+            val pool = app.koin.get<StatusesCachePool>()
             app.close()
             assertFalse(scope.isActive)
             assertTrue(scope.coroutineContext[Job]!!.children.none(), "Container close must join the pool worker")
@@ -306,7 +306,7 @@ class AppModuleTest {
         cases.forEach { (setting, config) ->
             val app = appWith(config)
             try {
-                val error = assertFailsFast { app.koin.get<StatusesPool>() }
+                val error = assertFailsFast { app.koin.get<StatusesCachePool>() }
                 assertIs<IllegalArgumentException>(error)
                 assertTrue(error.message!!.contains(setting), "error must name $setting: ${error.message}")
             } finally {
@@ -368,7 +368,7 @@ class AppModuleTest {
         assertEquals("fileToken", store.accessToken)
         assertEquals("English", store.targetLanguage)
         // the defaults fill what nobody configured
-        assertEquals(StatusesPool.DEFAULT_BATCH_WINDOW, store.poolBatchWindow)
+        assertEquals(StatusesCachePool.DEFAULT_BATCH_WINDOW, store.poolBatchWindow)
     }
 
     @Test

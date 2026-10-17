@@ -21,14 +21,14 @@ import kotlinx.coroutines.withContext
  *
  * The instance's DELETE budget is small (30 requests / 30 minutes per
  * account by default, on top of the shared token and account buckets),
- * but request starts are not paced: like [StatusesPool]'s worker, a 429
+ * but request starts are not paced: like [StatusesCachePool]'s worker, a 429
  * waits for the instance's `X-RateLimit-Reset` via [rateLimitBackoff]
  * (see [RateLimitBackoff] for the wait computation) and then retries the
  * same status, without bound — the instance says when we may proceed,
  * and fixed wall-clock windows make spacing requests save no budget.
  *
  * Cache coherence: after a DELETE that returned — success or an
- * already-gone 404 — the status is dropped via [StatusesPool.invalidate],
+ * already-gone 404 — the status is dropped via [StatusesCachePool.invalidate],
  * which also cancels its outstanding lookups, so neither a cached copy
  * nor a pre-deletion in-flight response can serve a status that is
  * already gone. The invalidation runs [NonCancellable], so a cancellation
@@ -40,7 +40,7 @@ import kotlinx.coroutines.withContext
  * */
 class StatusesDeleter(
     private val client: StatusesClient,
-    private val pool: StatusesPool,
+    private val pool: StatusesCachePool,
     private val rateLimitBackoff: RateLimitBackoff = RateLimitBackoff(),
 ) {
     private val logger = KotlinLogging.logger {}

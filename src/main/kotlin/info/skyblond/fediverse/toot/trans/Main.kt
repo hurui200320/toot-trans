@@ -8,7 +8,7 @@ import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
 import info.skyblond.fediverse.toot.trans.masto.statuses.findTranslationChainState
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -28,7 +28,7 @@ fun main() {
         // placeholder here
         val llmClient = koin.get<ChatClient>()
         val accountsClient = koin.get<AccountsClient>()
-        val statusesPool = koin.get<StatusesPool>()
+        val statusesPool = koin.get<StatusesCachePool>()
         val deleter = koin.get<StatusesDeleter>()
         val filter = koin.get<TootFilter>()
         val account = koin.get<CredentialAccount>()
@@ -64,7 +64,7 @@ fun main() {
                             }
                         }
 
-                        // TODO: LLM translate and post.
+                        // TODO: LLM translate and post. Currently use logging as placeholder
                         logger.info {
                             "Pending translation: id=${toot.id}, " +
                                     "reason=${state.reason}, obsolete=${state.obsolete.size}, " +

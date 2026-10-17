@@ -19,7 +19,7 @@ import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -87,8 +87,8 @@ fun appModule(config: ConfigStore): Module = module {
     // [StatusesPool]; like the scope above, the pool is closed by
     // its onClose callback when the container stops; see [StatusesPool.close]
     // for the blocking teardown contract.
-    single<StatusesPool> {
-        StatusesPool(
+    single<StatusesCachePool> {
+        StatusesCachePool(
             client = get(),
             scope = get(),
             batchWindow = config.poolBatchWindow,

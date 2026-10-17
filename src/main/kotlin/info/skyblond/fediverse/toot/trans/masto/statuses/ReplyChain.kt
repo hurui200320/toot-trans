@@ -12,7 +12,7 @@ import kotlinx.coroutines.ensureActive
  * Missing ancestors and cycles fail closed. There is no permissive depth
  * limit. Reads use the pool; transport/API failures and cancellation propagate.
  */
-suspend fun StatusesPool.checkReplyChain(
+suspend fun StatusesCachePool.checkReplyChain(
     status: Status,
     account: CredentialAccount,
 ): Boolean {

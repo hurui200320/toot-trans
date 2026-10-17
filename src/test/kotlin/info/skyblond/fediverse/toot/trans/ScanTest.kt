@@ -8,7 +8,7 @@ import info.skyblond.fediverse.toot.trans.masto.statuses.CreateStatusRequest
 import info.skyblond.fediverse.toot.trans.masto.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusSource
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
@@ -99,7 +99,7 @@ class ScanTest {
     private fun TestScope.poolFor(
         client: StatusesClient,
         maxCacheEntries: Int = 1_000,
-    ): StatusesPool = StatusesPool(
+    ): StatusesCachePool = StatusesCachePool(
         client, backgroundScope,
         maxCacheEntries = maxCacheEntries,
         timeSource = testScheduler.timeSource,

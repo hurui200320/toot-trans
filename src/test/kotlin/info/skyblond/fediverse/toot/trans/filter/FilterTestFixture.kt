@@ -4,7 +4,7 @@ import info.skyblond.fediverse.toot.trans.masto.statuses.CreateStatusRequest
 import info.skyblond.fediverse.toot.trans.masto.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusSource
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.now
 import info.skyblond.fediverse.toot.trans.masto.statuses.owner
 import kotlinx.coroutines.test.TestScope
@@ -29,7 +29,7 @@ internal class FilterTestFixture(scope: TestScope, statuses: List<Status>) {
         override suspend fun getStatusSource(statusId: String): StatusSource = error("Not this milestone")
         override suspend fun createStatus(draft: CreateStatusRequest): Status = error("Not this milestone")
     }
-    val pool = StatusesPool(
+    val pool = StatusesCachePool(
         client, scope.backgroundScope, batchWindow = 1.milliseconds,
         timeSource = scope.testScheduler.timeSource,
     )

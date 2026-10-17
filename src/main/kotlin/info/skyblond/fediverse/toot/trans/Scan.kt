@@ -7,7 +7,7 @@ import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.statuses.Status
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesPool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.delay
 import java.io.IOException
 import kotlin.time.Duration
@@ -43,7 +43,7 @@ import kotlin.time.Duration.Companion.seconds
  * */
 suspend fun performInitialScan(
     accountsClient: AccountsClient,
-    statusesPool: StatusesPool,
+    statusesPool: StatusesCachePool,
     account: CredentialAccount,
     size: Int,
     limit: Int = AccountsClient.GET_STATUSES_LIMIT,
@@ -156,7 +156,7 @@ private suspend fun fetchPageWithRetry(
  * Built-in default for [performInitialScan]'s [transientMaxRetry]; the
  * config package's default provider reuses it so the deploy default
  * cannot drift apart from the programmatic/test default, same pattern
- * as [StatusesPool]'s companion object.
+ * as [StatusesCachePool]'s companion object.
  * */
 const val DEFAULT_TRANSIENT_MAX_RETRY = 10
 
