@@ -10,7 +10,7 @@ import org.jsoup.nodes.TextNode
  *
  * The marker makes replies recognizable without local state:
  * - [hash]: 8 uppercase hex chars (0-9A-F) derived from the source
- *   toot (see `Status.crc32()` in `masto/statuses/Models.kt`).
+ *   toot (see `Status.crc32()` in `masto/client/statuses/Models.kt`).
  * - [seq] and [total]: the 1-based index and the count of the
  *   segments the full translation was split into.
  * How the marker is used to reconstruct and classify a translation chain

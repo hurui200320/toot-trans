@@ -2,6 +2,8 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -39,7 +41,7 @@ import kotlin.time.TimeSource
  * The size-bounded LRU cache expires after insertion, never after access.
  * Omitted IDs resolve to null without caching; callers should avoid repeatedly
  * requesting missing statuses. 429s suspend the worker for the wait computed
- * by the shared [rateLimitBackoff] — see [RateLimitBackoff] for the
+ * by the shared [rateLimitBackoff] — see [info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff] for the
  * reset-header semantics and its fallback — then retry the batch; other
  * errors fail that batch's callers with no automatic retry.
  * Cache hits and [seed] remain available during backoff.
@@ -94,7 +96,7 @@ class StatusesCachePool(
         require(maxCacheEntries > 0) { "maxCacheEntries must be positive" }
 
         logger.info {
-            "StatusesPool initialized with " +
+            "StatusesCachePool initialized with " +
                     "batchWindow=$batchWindow, " +
                     "cacheTtl=$cacheTtl, " +
                     "maxCacheEntries=$maxCacheEntries"

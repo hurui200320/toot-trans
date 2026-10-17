@@ -2,6 +2,8 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -23,7 +25,7 @@ import kotlinx.coroutines.withContext
  * account by default, on top of the shared token and account buckets),
  * but request starts are not paced: like [StatusesCachePool]'s worker, a 429
  * waits for the instance's `X-RateLimit-Reset` via [rateLimitBackoff]
- * (see [RateLimitBackoff] for the wait computation) and then retries the
+ * (see [info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff] for the wait computation) and then retries the
  * same status, without bound — the instance says when we may proceed,
  * and fixed wall-clock windows make spacing requests save no budget.
  *

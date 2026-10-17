@@ -1,4 +1,4 @@
-package info.skyblond.fediverse.toot.trans.masto.statuses
+package info.skyblond.fediverse.toot.trans.masto.client.statuses
 
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName

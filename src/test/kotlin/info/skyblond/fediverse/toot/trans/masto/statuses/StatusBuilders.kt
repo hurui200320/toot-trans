@@ -1,7 +1,8 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.llm.Footer
-import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import java.time.Instant
 
 /**

@@ -1,6 +1,7 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.llm.Footer
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

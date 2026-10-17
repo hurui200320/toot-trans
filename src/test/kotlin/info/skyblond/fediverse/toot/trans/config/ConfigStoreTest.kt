@@ -7,7 +7,7 @@ import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive

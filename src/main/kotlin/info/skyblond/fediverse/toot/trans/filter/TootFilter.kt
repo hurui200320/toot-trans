@@ -1,8 +1,8 @@
 package info.skyblond.fediverse.toot.trans.filter
 
 import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooterFromContent
-import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
-import info.skyblond.fediverse.toot.trans.masto.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
 import info.skyblond.fediverse.toot.trans.masto.statuses.checkReplyChain

@@ -1,7 +1,7 @@
-package info.skyblond.fediverse.toot.trans.masto.accounts
+package info.skyblond.fediverse.toot.trans.masto.client.accounts
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import kotlinx.serialization.builtins.ListSerializer
 
 /**

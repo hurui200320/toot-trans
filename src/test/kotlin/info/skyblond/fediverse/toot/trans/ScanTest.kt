@@ -2,12 +2,12 @@ package info.skyblond.fediverse.toot.trans
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
-import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
-import info.skyblond.fediverse.toot.trans.masto.statuses.CreateStatusRequest
-import info.skyblond.fediverse.toot.trans.masto.statuses.Status
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusSource
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.CreateStatusRequest
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusSource
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async

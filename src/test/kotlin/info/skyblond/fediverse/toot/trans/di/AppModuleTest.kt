@@ -14,11 +14,11 @@ import info.skyblond.fediverse.toot.trans.llm.client.RetryingChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.firstChoiceText
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
-import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
-import info.skyblond.fediverse.toot.trans.masto.accounts.OkHttpAccountsClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.OkHttpStatusesClient
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.OkHttpAccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.OkHttpStatusesClient
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.CancellationException

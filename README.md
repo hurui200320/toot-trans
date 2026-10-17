@@ -123,7 +123,7 @@ consumes (`llmModel`, `llmMaxCompletionTokens`).
 
 The `pool*` settings tune `StatusesCachePool`; their batching and caching semantics
 are documented in its KDoc in
-`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`,
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesCachePool.kt`,
 and the `backoff*` ones tune
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/RateLimitBackoff.kt` —
 the 429 backoff policy shared by the pool's worker, the boot-up scan, and
@@ -203,12 +203,12 @@ targetLangCode=en
 
 Use `StatusesCachePool` for status-by-ID reads instead of calling the HTTP client
 directly. Its KDoc in
-`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesPool.kt`
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesCachePool.kt`
 documents cache, batching, retry, and lifecycle settings. The `pool*` configs
 in the table above override those settings at deploy time.
 
 ```kotlin
-val pool = StatusesPool(statusesClient, applicationScope)
+val pool = StatusesCachePool(statusesClient, applicationScope)
 try {
     pool.seed(statusesFromAccountPolling)
     val parent = pool.getStatus(parentId)

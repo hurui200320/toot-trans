@@ -2,6 +2,7 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.llm.Footer
 import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooterFromContent
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 
 /**
  * The translation chain of one original toot: each segment's [Status] with

@@ -2,6 +2,10 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.CreateStatusRequest
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusSource
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi

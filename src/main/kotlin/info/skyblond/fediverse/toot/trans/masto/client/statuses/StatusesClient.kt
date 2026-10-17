@@ -1,4 +1,4 @@
-package info.skyblond.fediverse.toot.trans.masto.statuses
+package info.skyblond.fediverse.toot.trans.masto.client.statuses
 
 interface StatusesClient {
     companion object {

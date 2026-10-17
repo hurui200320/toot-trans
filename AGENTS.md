@@ -33,8 +33,8 @@ the original toot.
 
 Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid using Mastodon in code due to copyright issues).
 
-- `masto/statuses/StatusesPool.kt`: shared cached/batched lookups, lifecycle,
-  cache bypass, and rate-limit retry semantics.
+- `masto/statuses/StatusesCachePool.kt`: shared cached/batched lookups,
+  lifecycle, cache bypass, and rate-limit retry semantics.
 - `masto/statuses/StatusesDeleter.kt`: leaf-first deletion of obsolete
   translation segments, 429 backoff, and pool invalidation on success.
 - `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
@@ -45,6 +45,9 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 - `masto/statuses/ReplyChain.kt`: full ancestor qualification.
 - `masto/statuses/TranslationChain.kt`: in-memory reconstruction and
   classification of an original's translation chain.
+- `masto/client/`: instance API wire layer over `MastoApiClient.kt`, split
+  into `accounts/` and `statuses/`: contracts, OkHttp transports and the
+  wire models.
 - `llm/client/ChatClient.kt`: stateless, non-streaming Chat Completions
   contract; entry point for the wire documentation.
 - `llm/client/OkHttpChatClient.kt`: direct transport: endpoint derivation,
@@ -89,7 +92,7 @@ exhausted bucket returns HTTP 429. This project's traffic touches:
   exhaustion; windows are fixed wall-clock periods, not sliding.
 - Steady-state budget is tiny (one poll/min ≈ 1.6% of the token bucket).
 - `MastoApiClient.kt` exposes `X-RateLimit-Reset` on 429 in
-  `MastoApiException.rateLimitReset`; `StatusesPool.kt` and
+  `MastoApiException.rateLimitReset`; `StatusesCachePool.kt` and
   `StatusesDeleter.kt` consume it for pooled lookups and deletions
   respectively. Other API traffic must handle its own rate limits.
 

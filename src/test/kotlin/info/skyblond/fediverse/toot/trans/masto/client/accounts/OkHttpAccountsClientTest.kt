@@ -1,4 +1,4 @@
-package info.skyblond.fediverse.toot.trans.masto.accounts
+package info.skyblond.fediverse.toot.trans.masto.client.accounts
 
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.MastoApiTestBase

@@ -4,9 +4,9 @@ import info.skyblond.fediverse.toot.trans.config.requireValidRetryDelay
 import info.skyblond.fediverse.toot.trans.config.requireValidTransientMaxRetry
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
-import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
-import info.skyblond.fediverse.toot.trans.masto.statuses.Status
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.delay
 import java.io.IOException

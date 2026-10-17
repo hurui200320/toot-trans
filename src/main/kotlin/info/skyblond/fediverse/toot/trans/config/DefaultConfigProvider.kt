@@ -6,7 +6,7 @@ import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
@@ -20,7 +20,7 @@ class DefaultConfigProvider : ConfigProvider {
     override val accessToken: String? = null
 
     // optional pool and backoff configs, defaults are single-sourced in
-    // [StatusesPool]'s and [RateLimitBackoff]'s companion objects so
+    // [StatusesCachePool]'s and [RateLimitBackoff]'s companion objects so
     // they cannot drift apart
     override val poolBatchWindow: Duration = StatusesCachePool.DEFAULT_BATCH_WINDOW
     override val poolCacheTtl: Duration = StatusesCachePool.DEFAULT_CACHE_TTL

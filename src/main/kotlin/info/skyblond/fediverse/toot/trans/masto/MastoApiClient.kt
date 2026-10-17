@@ -19,8 +19,8 @@ import okio.blackholeSink
  * Shared transport for the instance's REST API: authentication,
  * request execution and JSON decoding.
  *
- * Endpoint-specific clients (see `accounts/AccountsClient.kt` and
- * `statuses/StatusesClient.kt`) build on this class; they own the
+ * Endpoint-specific clients (see `client/accounts/AccountsClient.kt` and
+ * `client/statuses/StatusesClient.kt`) build on this class; they own the
  * wire protocol documentation, this class only deals with transport.
  * */
 class MastoApiClient(

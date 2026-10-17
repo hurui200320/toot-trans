@@ -5,8 +5,8 @@ import info.skyblond.fediverse.toot.trans.di.appModule
 import info.skyblond.fediverse.toot.trans.filter.TootFilter
 import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
-import info.skyblond.fediverse.toot.trans.masto.accounts.AccountsClient
-import info.skyblond.fediverse.toot.trans.masto.accounts.CredentialAccount
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
