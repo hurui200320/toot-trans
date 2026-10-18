@@ -69,6 +69,7 @@ class EnvConfigProviderTest {
         assertNull(provider.transientMaxRetry)
         assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
+        assertNull(provider.replyChainDepth)
         assertNull(provider.targetLanguage)
         assertNull(provider.targetLangCode)
     }
@@ -101,6 +102,21 @@ class EnvConfigProviderTest {
             EnvConfigProvider(mapOf("TRANSLATION_COOLDOWN" to "soon")::get).translationCooldown
         }
         assertTrue(e.message!!.contains("TRANSLATION_COOLDOWN"))
+    }
+
+    @Test
+    fun `reads reply chain depth including zero from the environment`() {
+        assertEquals(5, EnvConfigProvider(mapOf("REPLY_CHAIN_DEPTH" to "5")::get).replyChainDepth)
+        assertEquals(0, EnvConfigProvider(mapOf("REPLY_CHAIN_DEPTH" to "0")::get).replyChainDepth)
+    }
+
+    @Test
+    fun `blank reply chain depth is unset and malformed names variable`() {
+        assertNull(EnvConfigProvider(mapOf("REPLY_CHAIN_DEPTH" to " ")::get).replyChainDepth)
+        val e = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("REPLY_CHAIN_DEPTH" to "deep")::get).replyChainDepth
+        }
+        assertTrue(e.message!!.contains("REPLY_CHAIN_DEPTH"))
     }
 
     @Test

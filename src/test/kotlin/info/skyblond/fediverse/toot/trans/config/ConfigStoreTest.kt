@@ -8,6 +8,7 @@ import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
+import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -37,6 +38,7 @@ class ConfigStoreTest {
         targetLanguage: String? = null,
         targetLangCode: String? = null,
         translationCooldown: Duration? = null,
+        replyChainDepth: Int? = null,
         llmBaseUrl: String? = null,
         llmApiKey: String? = null,
         llmConnectTimeout: Duration? = null,
@@ -61,6 +63,7 @@ class ConfigStoreTest {
         override val targetLanguage: String? = targetLanguage
         override val targetLangCode: String? = targetLangCode
         override val translationCooldown: Duration? = translationCooldown
+        override val replyChainDepth: Int? = replyChainDepth
         override val llmBaseUrl: String? = llmBaseUrl
         override val llmApiKey: String? = llmApiKey
         override val llmConnectTimeout: Duration? = llmConnectTimeout
@@ -493,5 +496,27 @@ class ConfigStoreTest {
         ))
         val malformed = assertFailsWith<IllegalArgumentException> { store.translationCooldown }
         assertTrue(malformed.message!!.contains("TRANSLATION_COOLDOWN"))
+    }
+
+    @Test
+    fun `reply chain depth respects precedence null fallback and built-in default`() {
+        // first non-null wins, so the zero of the middle provider is used
+        val store = ConfigStore(listOf(
+            provider(), provider(replyChainDepth = 0), provider(replyChainDepth = 5),
+        ))
+        assertEquals(0, store.replyChainDepth)
+        val defaults = ConfigStore(listOf(provider(), DefaultConfigProvider()))
+        assertEquals(ReplyChainContext.DEFAULT_MAX_DEPTH, defaults.replyChainDepth)
+    }
+
+    @Test
+    fun `missing and malformed reply chain depth fail rather than falling through`() {
+        val missing = assertFailsWith<MissingConfigException> { ConfigStore(listOf(provider())).replyChainDepth }
+        assertTrue(missing.message!!.contains("reply chain depth"))
+        val store = ConfigStore(listOf(
+            EnvConfigProvider(mapOf("REPLY_CHAIN_DEPTH" to "deep")::get), DefaultConfigProvider(),
+        ))
+        val malformed = assertFailsWith<IllegalArgumentException> { store.replyChainDepth }
+        assertTrue(malformed.message!!.contains("REPLY_CHAIN_DEPTH"))
     }
 }

@@ -1,6 +1,7 @@
 package info.skyblond.fediverse.toot.trans.llm
 
 import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooterFromText
+import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.removeFooterFromText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -180,5 +181,39 @@ class FooterTest {
     fun `returns null for numbers beyond int range`() {
         assertNull("🌐A1B2C3D4#99999999999#99999999999".matchFooterFromText())
         assertNull("🌐A1B2C3D4#1#2147483648".matchFooterFromText())
+    }
+
+    // --- removeFooterFromText: the removing twin ---
+
+    @Test
+    fun `removes the footer line and keeps the body`() {
+        assertEquals("Hello world!", "Hello world!\n🌐A1B2C3D4#1#1".removeFooterFromText())
+        assertEquals("line one\nline two", "line one\nline two\n🌐A1B2C3D4#1#2".removeFooterFromText())
+    }
+
+    @Test
+    fun `keeps the blank lines around the removed footer`() {
+        assertEquals("body\n", "body\n🌐A1B2C3D4#1#1\n".removeFooterFromText())
+        assertEquals("body\n\n", "body\n🌐A1B2C3D4#1#1\n\n".removeFooterFromText())
+        assertEquals("body", "body\n🌐A1B2C3D4#1#1".removeFooterFromText())
+    }
+
+    @Test
+    fun `normalizes crlf line endings while removing`() {
+        assertEquals("Hello\n", "Hello\r\n🌐A1B2C3D4#1#1\r\n".removeFooterFromText())
+    }
+
+    @Test
+    fun `leaves text without a valid footer unchanged`() {
+        assertEquals("Just a normal toot", "Just a normal toot".removeFooterFromText())
+        assertEquals("🌐A1B2C3D4#1#1\nmore", "🌐A1B2C3D4#1#1\nmore".removeFooterFromText())
+        assertEquals("prefix 🌐A1B2C3D4#1#1", "prefix 🌐A1B2C3D4#1#1".removeFooterFromText())
+        assertNull("body\n🌐aaaaaaaa#1#1".matchFooterFromText())
+        assertEquals("body\n🌐aaaaaaaa#1#1", "body\n🌐aaaaaaaa#1#1".removeFooterFromText())
+    }
+
+    @Test
+    fun `strips only the last footer line when several exist`() {
+        assertEquals("🌐A1B2C3D4#1#2", "🌐A1B2C3D4#1#2\n🌐A1B2C3D4#2#2".removeFooterFromText())
     }
 }

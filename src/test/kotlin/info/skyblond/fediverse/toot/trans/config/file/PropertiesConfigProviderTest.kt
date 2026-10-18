@@ -130,6 +130,7 @@ class PropertiesConfigProviderTest {
         assertNull(provider.transientMaxRetry)
         assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
+        assertNull(provider.replyChainDepth)
     }
 
     @Test
@@ -159,6 +160,25 @@ class PropertiesConfigProviderTest {
         file.writeText("translationCooldown=soon\n")
         val e = assertFailsWith<IllegalArgumentException> { PropertiesConfigProvider(file).translationCooldown }
         assertTrue(e.message!!.contains("translationCooldown"))
+    }
+
+    @Test
+    fun `reads reply chain depth from properties including zero and blank`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("replyChainDepth=5\n")
+        assertEquals(5, PropertiesConfigProvider(file).replyChainDepth)
+        file.writeText("replyChainDepth=0\n")
+        assertEquals(0, PropertiesConfigProvider(file).replyChainDepth)
+        file.writeText("replyChainDepth=   \n")
+        assertNull(PropertiesConfigProvider(file).replyChainDepth)
+    }
+
+    @Test
+    fun `malformed reply chain depth names properties key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("replyChainDepth=deep\n")
+        val e = assertFailsWith<IllegalArgumentException> { PropertiesConfigProvider(file).replyChainDepth }
+        assertTrue(e.message!!.contains("replyChainDepth"))
     }
 
     @Test

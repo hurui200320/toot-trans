@@ -49,6 +49,9 @@ class EnvConfigProvider(
     override val translationCooldown: Duration?
         get() = duration("TRANSLATION_COOLDOWN")
 
+    override val replyChainDepth: Int?
+        get() = int("REPLY_CHAIN_DEPTH")
+
     override val targetLanguage: String?
         get() = string("TARGET_LANGUAGE")
 

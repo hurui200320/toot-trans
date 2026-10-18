@@ -87,6 +87,16 @@ interface ConfigProvider {
     val translationCooldown: Duration?
 
     /**
+     * How many ancestors above the toot under translation feed the LLM
+     * context as history; 0 disables the history. Each ancestor adds a
+     * user turn (its original) and an assistant turn (its existing
+     * translation, or `<missing translation>`); see
+     * `TranslationRequestFactory` and `ReplyChainContext` in
+     * `masto/statuses/`.
+     * */
+    val replyChainDepth: Int?
+
+    /**
      * Target language for translation in plain text.
      * For example, "English" or "Simplified Chinese".
      * */

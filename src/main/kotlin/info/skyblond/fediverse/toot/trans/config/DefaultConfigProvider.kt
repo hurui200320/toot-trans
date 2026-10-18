@@ -7,6 +7,7 @@ import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
+import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
@@ -44,6 +45,10 @@ class DefaultConfigProvider : ConfigProvider {
     // so the deploy default cannot drift apart from the programmatic/test
     // default
     override val translationCooldown: Duration = Cooldown.DEFAULT_DURATION
+
+    // optional, default single-sourced from [ReplyChainContext]'s companion
+    // object like the other component defaults
+    override val replyChainDepth: Int = ReplyChainContext.DEFAULT_MAX_DEPTH
 
     // required config, no default
     override val targetLanguage: String? = null

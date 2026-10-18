@@ -46,3 +46,15 @@ fun requireValidCooldown(name: String, value: Duration): Duration {
     }
     return value
 }
+
+/**
+ * Shared predicate of the reply-chain depth contract: the depth must
+ * be non-negative, where 0 disables the LLM history. Consumers:
+ * `ReplyChainContext`'s constructor, so a programmatic value fails at
+ * the component, and `di/AppModule.kt`, so a config value fails naming
+ * the setting.
+ * */
+fun requireValidReplyChainDepth(name: String, value: Int): Int {
+    require(value >= 0) { "$name must be non-negative, got $value" }
+    return value
+}

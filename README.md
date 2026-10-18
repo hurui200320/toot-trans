@@ -100,9 +100,10 @@ The default file name is gitignored, so you won't commit your token by accident.
 If a required setting is not provided by any source, the app fails with a
 `MissingConfigException` (fail-fast) instead of running with a half-empty
 config: at startup for the settings the boot path reads (the instance
-connection, the target language, and the LLM transport — `llmBaseUrl`,
-`llmApiKey`), or when the translation stage first reads the ones only it
-consumes (`llmModel`, `llmMaxCompletionTokens`).
+connection, the target language, the LLM transport — `llmBaseUrl`,
+`llmApiKey` — and the translation stage's `llmModel`,
+`llmMaxCompletionTokens`, which the stage resolves while the container is
+built).
 
 | Setting | Environment variable | Properties key | Required | Example |
 |---|---|---|---|---|
@@ -118,6 +119,7 @@ consumes (`llmModel`, `llmMaxCompletionTokens`).
 | Transient max retry | `TRANSIENT_MAX_RETRY` | `transientMaxRetry` | No, default `10` | `5` |
 | Transient retry delay | `TRANSIENT_RETRY_DELAY` | `transientRetryDelay` | No, default `10s` | `30s` |
 | Translation cooldown | `TRANSLATION_COOLDOWN` | `translationCooldown` | No, default `3m`; `0s` disables | `1m` |
+| Reply chain depth | `REPLY_CHAIN_DEPTH` | `replyChainDepth` | No, default `3`; `0` disables context | `5` |
 | Target language | `TARGET_LANGUAGE` | `targetLanguage` | Yes | `English` |
 | Target lang code | `TARGET_LANG_CODE` | `targetLangCode` | Yes | `en` |
 | LLM base URL | `LLM_BASE_URL` | `llmBaseUrl` | Yes | `https://api.openai.com/v1` |
@@ -194,7 +196,10 @@ the cooldown timing (`editedAt ?: createdAt`, checked against the fetch
 time) on `Cooldown` in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/Cooldown.kt`.
 `initialScanSize` limits the number of recent posts, not their age; there is
-no separate time cutoff.
+no separate time cutoff. `replyChainDepth` bounds how many ancestors feed the
+LLM context; the context rules (pool reads, source fetches, translated-ancestor
+turns, media) live on `ReplyChainContext` in
+`src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/ReplyChainContext.kt`.
 
 Example `config.properties`:
 
@@ -205,13 +210,14 @@ targetLanguage=English
 targetLangCode=en
 
 # LLM provider settings: the base URL and key are needed at startup,
-# the rest once the translation stage lands
+# the rest shape every translation request
 # llmBaseUrl=https://api.openai.com/v1
 # llmApiKey=your-provider-key
 # llmModel=gpt-5-mini
 # llmMaxCompletionTokens=4096
 # llmReasoningEffort=medium
 # llmReqExtra={}
+# replyChainDepth=3
 ```
 
 ## Shared status lookups

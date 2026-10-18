@@ -75,6 +75,9 @@ class PropertiesConfigProvider(
     override val translationCooldown: Duration?
         get() = duration("translationCooldown")
 
+    override val replyChainDepth: Int?
+        get() = int("replyChainDepth")
+
     override val targetLanguage: String?
         get() = string("targetLanguage")
 

@@ -93,6 +93,26 @@ data class Footer(
         }
 
         /**
+         * [String.matchFooterFromText]'s removing twin: the same
+         * matching rules, but the matched footer line is dropped from
+         * the result instead of returned. Used to recover a
+         * translation's plain text for the LLM history, where the
+         * marker is metadata, not content.
+         *
+         * Returns the text unchanged when there is no valid footer.
+         * Line endings are normalized to `\n`, and only the footer's
+         * own line is removed: blank lines around it stay, so
+         * `"body\n🌐A1B2C3D4#1#1\n"` yields `"body\n"`.
+         * */
+        fun String.removeFooterFromText(): String {
+            val lines = lineSequence().toList()
+            val lastNonBlank = lines.indexOfLast { it.isNotBlank() }
+            if (lastNonBlank < 0) return this
+            if (lines[lastNonBlank].matchFooterFromText() == null) return this
+            return lines.filterIndexed { index, _ -> index != lastNonBlank }.joinToString("\n")
+        }
+
+        /**
          * Match a footer in the HTML `content` of a locally authored
          * post on vanilla Mastodon, without any status-source API call.
          * Arbitrary federated rich text and customized forks are outside

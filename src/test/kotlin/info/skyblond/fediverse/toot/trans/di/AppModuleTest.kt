@@ -72,6 +72,7 @@ class AppModuleTest {
         targetLanguage: String? = null,
         targetLangCode: String? = null,
         translationCooldown: Duration? = null,
+        replyChainDepth: Int? = null,
         llmBaseUrl: String? = null,
         llmApiKey: String? = null,
         llmConnectTimeout: Duration? = null,
@@ -98,6 +99,7 @@ class AppModuleTest {
                 override val targetLanguage: String? = targetLanguage
                 override val targetLangCode: String? = targetLangCode
                 override val translationCooldown: Duration? = translationCooldown
+                override val replyChainDepth: Int? = replyChainDepth
                 override val llmBaseUrl: String? = llmBaseUrl
                 override val llmApiKey: String? = llmApiKey
                 override val llmConnectTimeout: Duration? = llmConnectTimeout

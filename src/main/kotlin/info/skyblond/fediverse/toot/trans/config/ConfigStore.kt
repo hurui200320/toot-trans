@@ -59,6 +59,9 @@ class ConfigStore(
     override val translationCooldown: Duration
         get() = getOrThrow("translation cooldown") { it.translationCooldown }
 
+    override val replyChainDepth: Int
+        get() = getOrThrow("reply chain depth") { it.replyChainDepth }
+
     override val targetLanguage: String
         get() = getOrThrow("target language") { it.targetLanguage }
 
