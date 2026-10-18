@@ -58,3 +58,15 @@ fun requireValidReplyChainDepth(name: String, value: Int): Int {
     require(value >= 0) { "$name must be non-negative, got $value" }
     return value
 }
+
+/**
+ * Shared predicate of the max-completion-tokens contract: the token
+ * budget must be positive, because the chat request model rejects zero
+ * and negative values. Consumers: `TranslationRequestFactory`'s
+ * constructor, so a programmatic value fails at the component, and
+ * `di/AppModule.kt`, so a config value fails naming the setting.
+ * */
+fun requireValidMaxCompletionTokens(name: String, value: Int): Int {
+    require(value > 0) { "$name must be positive, got $value" }
+    return value
+}

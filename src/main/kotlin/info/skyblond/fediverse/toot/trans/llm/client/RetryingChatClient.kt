@@ -54,7 +54,7 @@ class RetryingChatClient(
             try {
                 return delegate.complete(request)
             } catch (e: ChatApiException) {
-                if (!isRetryable(e) || attempt >= maxAttempts) throw e
+                if (!e.isRetryable() || attempt >= maxAttempts) throw e
                 logger.warn(e) {
                     "Chat completion attempt $attempt/$maxAttempts failed " +
                             "(HTTP ${e.httpCode}: ${e.detail}), retrying in $retryDelay"
@@ -68,14 +68,6 @@ class RetryingChatClient(
             attempt++
             delay(retryDelay)
         }
-    }
-
-    /**
-     * Transient provider responses, see the class KDoc for why each is retried.
-     * */
-    private fun isRetryable(error: ChatApiException): Boolean = when (error.httpCode) {
-        408, 429 -> true
-        else -> error.httpCode in 500..599
     }
 
     companion object {
@@ -97,4 +89,16 @@ class RetryingChatClient(
          * */
         val DEFAULT_RETRY_DELAY: Duration = 10.seconds
     }
+}
+
+/**
+ * Whether [RetryingChatClient] treats this failure as retryable: 408, 429 and
+ * every 5xx (see that class's KDoc for the rationale). The predicate is public
+ * because consumers that see a final (already-exhausted) failure classify it
+ * with the same rule — `TranslationProcessor` distinguishes "retry on the next
+ * run" from "the toot itself is rejected" — and both sides must not drift.
+ * */
+fun ChatApiException.isRetryable(): Boolean = when (httpCode) {
+    408, 429 -> true
+    else -> httpCode in 500..599
 }

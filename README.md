@@ -16,17 +16,14 @@ as to the code, they are already in English.
 
 ## Current implementation
 
-The application currently performs one startup scan, feeds the pending
-queue (`masto/statuses/PendingQueue.kt`), and reconstructs each original's
-existing translation chain from the work window merged with the status
-pool's cached observations, newest fetch per ID (see
-`masto/statuses/TranslationChain.kt`). The queue is the work window: `feed`
-runs the entrance filter, `next` hands out the oldest entry, and `drop`
-removes a processed one. Dropping the queue head records it as the rolling
-cursor, so a later incremental scan can resume right after it; entries still
-inside the cooldown stay queued, so the cursor never skips something
-unprocessed. Ordering is by creation time, which keeps every parent ahead of
-its replies.
+The application performs one startup scan, feeds the pending queue
+(`masto/statuses/PendingQueue.kt`), and drains it through the translation stage
+(`TranslationProcessor.kt`). The queue is the work window: `feed` runs the
+entrance filter, `next` hands out the oldest entry, and `drop` removes a
+processed one. Dropping the queue head records it as the rolling cursor, so a
+later incremental scan can resume right after it; entries still inside the
+cooldown stay queued, so the cursor never skips something unprocessed. Ordering
+is by creation time, which keeps every parent ahead of its replies.
 
 > Mastodon lists the owner's statuses newest-first by status ID (creation
 > order; edits do not reorder the listing). A translation reply is always
@@ -34,13 +31,40 @@ its replies.
 > window, its segments are too: the chain can always be reconstructed from
 > the fetch result.
 
-LLM translation, posting, and periodic polling are not implemented yet: the
-OpenAI-compatible chat client is implemented and wired into the container
-(see [LLM client](#llm-client)), but nothing calls it until the translation
-stage lands.
-Invalid translation chains are already cleaned up: their obsolete segments
-are deleted (see `masto/statuses/StatusesDeleter.kt`), but the replacement
-translation is not posted yet.
+The drain, per eligible toot:
+
+1. Reconstruct the existing translation chain and delete obsolete segments
+   leaf-first when there is any (`masto/statuses/TranslationChain.kt`,
+   `masto/statuses/StatusesDeleter.kt`). A toot whose chain is already complete
+   is dropped untouched (one-shot).
+2. Build the LLM context (`masto/statuses/ReplyChainContext.kt`): up to
+   `replyChainDepth` ancestors through the status pool, every entry's composing
+   text via `/statuses/:id/source`, each translated ancestor as a user/assistant
+   turn (`<missing translation>` for an ancestor without a complete chain,
+   `<empty content>` for a toot with neither body nor warning), and the toot's
+   own images (bounded, failures skipped) for the vision input.
+3. Translate (`llm/Translator.kt`): the request ladder is full (history +
+   context + images) → text-only → minimal, downgrading on a payload-shaped 4xx;
+   the answer is one JSON object `{"translation": ..., "spoiler_text": ...}`
+   (`llm/TranslationOutput.kt`), constrained by a strict JSON schema sent as
+   `response_format` on every request — structured outputs are a requirement, so
+   a provider or model without them cannot be used — with the original
+   content warning kept when the model omits it and a content-warning-only toot
+   mirrored as a body-less translation carrying the translated warning.
+
+The finished translation is logged, not posted: one block per toot, framed by
+markers, carrying the source, both content warnings and the answer (see
+`TranslationProcessor.kt`), so the prompt and the result can be reviewed
+without touching the instance. Posting the translation as a reply chain is the
+next milestone.
+
+Failure policy (see `TranslationProcessor`): toot-specific failures — an
+unparseable answer, a permanently rejected payload after the ladder, a chain
+status deleted outside the application (a source read answering 404) — drop the
+toot with a loud log so the queue keeps moving; rate limits, server errors and
+transport errors stop the drain and leave everything queued for the next run.
+Credential/configuration failures (an LLM 4xx outside the payload set)
+propagate, because no following toot could succeed either.
 
 The chain rules — what counts as a complete chain, why stale chains are
 accepted (one-shot), the language scoping for deployments sharing one
@@ -52,16 +76,22 @@ The queue only decides what enters the work window; see
 
 ### Known limitations (current stage)
 
-- Invalid chains (for example a half-posted `#1#3` of a 3-segment
-  translation, or a valid chain with a leftover segment) are detected and
-  their segments are deleted before retranslation, but the retranslation
-  itself needs the translation and posting stage: nothing is posted yet.
+- Nothing is posted yet: the drain logs each finished translation and drops
+  the entry, so the prompt and its output can be reviewed without touching
+  the instance. Splitting the answer into footer-carrying segments and posting
+  them as a reply chain is the next milestone.
+- The periodic cursor-based scan is not implemented: the process drains the
+  boot scan and exits, and the in-memory window is rebuilt on the next run.
+  Run it in a loop or from cron until the polling milestone lands.
 - A translated original is never refreshed: the one-shot policy accepts a
   complete chain even when the original was edited afterwards. The footer
   hash lets a reader detect the mismatch; this project ships no tooling for
   that yet.
 - Segments made unreachable by a parent deleted outside this application
   are not discovered and stay on the instance; clean up manually.
+- A permanently rejected toot (content filter, a model without the needed
+  capabilities even after the ladder) is skipped for that run and retried on
+  the next one; a provider that rejects everything keeps producing loud logs.
 
 ## Access Token
 
@@ -149,9 +179,10 @@ wrapper derives its attempt budget and fixed delay from them, see
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`; the previous
 `scanTransient*` names are gone. For the LLM client this means one completion
 can spend up to `transientMaxRetry + 1` attempts (the initial attempt plus
-that many retries), each attempt itself bounded by `llmReadTimeout`, so the
-budget multiplies the worst-case time a single translation can wait before
-the next polling cycle sees its failure.
+that many retries), each attempt itself bounded by `llmReadTimeout`, and the
+request ladder can multiply that by its three rungs (full/text/minimal) — so
+the budget multiplies the worst-case time a single translation can wait before
+the next run sees its failure.
 The `target*` pair picks the translation output: `targetLanguage` is the
 plain-text language name (e.g. `English`, `Simplified Chinese`), and
 `targetLangCode` is the language tag (e.g. `en`, `zh-CN`) used to tag the
@@ -170,23 +201,30 @@ from the shared OkHttp client, so connections and threads are still pooled
 together — and default to the transport's recommended values
 (`30s` / `10m` / `2m`): generation is slow, while the instance API keeps
 OkHttp's defaults. `llmModel`, `llmMaxCompletionTokens`,
-`llmReasoningEffort` and `llmReqExtra` shape every completion request and are
-consumed once the translation stage lands: the reasoning effort accepts the
+`llmReasoningEffort` and `llmReqExtra` shape every
+translation request: the
+reasoning effort accepts the
 enum names (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`,
 matched case-insensitively) and is optional — when unset, the field is
 omitted from the request, so providers that reject `reasoning_effort` are
 targeted by leaving it unset — and `llmReqExtra` must be a JSON object
 (defaulting to `{}` when unset) that does not name any field the client
-owns (see `ChatCompletionRequest.extra`).
+owns (see `ChatCompletionRequest.extra`; `response_format` is client-owned
+because the stage always sends the strict schema on it). Structured
+outputs are a requirement, not a preference: every translation request
+carries the strict JSON schema as its `response_format`, so a provider or
+model that does not support it cannot serve this project — there is no
+fallback to JSON mode or free text.
 Duration values accept units like `500ms`, `1s`, `2m`, `24h`, as well as
 ISO-8601 durations like `PT24H`. An empty value is treated as unset; a
 malformed or out-of-range value fails with an error naming the setting
 (durations must be at least `1ms`, except `backoffResetMargin` which allows
 `0s`, `translationCooldown` which is finite and non-negative, and the `llm*`
 timeouts which are finite and non-negative, where `0` disables the timeout;
-`poolMaxCacheEntries` must be positive; `initialScanSize` and
-`transientMaxRetry` must be non-negative, where `0` disables the boot-up scan
-and transient retries respectively).
+`poolMaxCacheEntries` and `llmMaxCompletionTokens` must be positive;
+`initialScanSize`, `transientMaxRetry`
+and `replyChainDepth` must be non-negative, where `0` disables the boot-up
+scan, transient retries and the LLM context respectively).
 
 The eligibility policy — the footered-reply/language/blank-body checks,
 the full reply-chain qualification, and the creation-time ordering — is
@@ -220,6 +258,24 @@ targetLangCode=en
 # replyChainDepth=3
 ```
 
+### Proxy
+
+HTTP traffic — the instance API, media downloads and the LLM transport
+alike — honors the conventional proxy environment variables: the first
+non-blank of `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`
+wins (the uppercase spelling of each pair beats the lowercase one). There
+is no per-scheme selection: the value is a plain-HTTP proxy and HTTPS
+targets are tunneled through it with `CONNECT`, so an HTTPS-only proxy
+setup needs only `HTTPS_PROXY`; set no variable to connect directly.
+
+The value must be a proxy URL such as `http://127.0.0.1:3128`. A
+malformed value, an `https://` URL (OkHttp connects to proxies in
+plaintext, it cannot speak TLS to one) and a URL carrying credentials
+(proxy authentication is not supported) all fail boot, naming the
+variable — a broken proxy setup never silently degrades to a direct
+connection. `NO_PROXY` is not honored: once a proxy is configured, every
+request uses it.
+
 ## Shared status lookups
 
 Use `StatusesCachePool` for status-by-ID reads instead of calling the HTTP client
@@ -251,14 +307,11 @@ every returned value is a `FetchedStatus` — the status plus the instant it
 was fetched — so time-sensitive checks (e.g. the cooldown) run against the
 observation time. Cache bypass still obeys the pool's batching and
 rate-limit handling.
-Account polling, status-source reads, and posting remain outside the pool.
+Account polling and status-source reads remain outside the pool.
 Deletion goes through `masto/statuses/StatusesDeleter.kt` instead of
 calling the HTTP client directly: it deletes leaf-first, honors the shared
 429 backoff, and calls `pool.invalidate` plus `PendingQueue.drop` after
-every successful DELETE.
-The startup scan handles its own rate limits using the shared backoff
-policy; future posting flows must do the same. The entrance filter does not
-invoke deletion.
+every successful DELETE. The entrance filter does not invoke deletion.
 
 ## LLM client
 
@@ -268,9 +321,11 @@ Translation talks to models through the OpenAI-compatible chat client in
 provider-agnostic and aims to support as many OpenAI-compatible providers as we
 can — OpenAI itself, llama.cpp's server, DeepInfra, synthetic.new, Novita,
 ZenMux, Gemini's OpenAI compatibility layer, and any other gateway that speaks
-`POST /chat/completions`. Pointing it at a provider is just an API root (a path
-such as `/v1` is expected) and an API key. The transport builds no HTTP client of
-its own: the caller injects one, built with the recommended timeouts on
+`POST /chat/completions` (and supports structured outputs, a deployment
+requirement — see the translation stage below). Pointing it at a provider is
+just an API root (a path such as `/v1` is expected) and an API key. The
+transport builds no HTTP client of its own: the caller injects one, built
+with the recommended timeouts on
 `OkHttpChatClient` (`RECOMMENDED_READ_TIMEOUT` / `RECOMMENDED_WRITE_TIMEOUT`
 because generation can run for minutes, `RECOMMENDED_CONNECT_TIMEOUT` so an
 unreachable endpoint fails fast).
@@ -303,10 +358,23 @@ reference, and the provider-specific notes live on `ChatCompletionRequest.extra`
   (408, 429, and all 5xx) are retried on a fixed delay with a bounded
   attempt budget (see `RetryingChatClient` for the exact policy); invalid requests,
   rejected keys, 402s and 403s, and malformed responses fail immediately, and a
-  failed translation is simply retried by the next polling cycle.
+  failed translation is simply retried by the next run.
 
 The client is wired into the application container: `ChatClient` resolves to
 `RetryingChatClient` over `OkHttpChatClient`, built from the `llm*` settings
 (see [Configuration](#configuration)) and resolved at startup, so a missing
-or invalid LLM transport config fails boot; nothing calls it until the
-translation stage is implemented.
+or invalid LLM transport config fails boot.
+
+The translation stage on top of the client is `llm/Translator.kt`: it tries the
+request ladder (full with images → text-only → minimal) and downgrades on each
+payload-shaped 4xx (400, 413, 415, 422) before giving up. The prompt contract —
+one JSON object `{"translation": ..., "spoiler_text": ...}`, user turns shaped
+like `{"text": ..., "spoiler_text": ...}`, the `<missing translation>` and
+`<empty content>` placeholders and the preservation rules — lives on
+`llm/TranslationRequestFactory.kt`, together with the strict JSON schema sent
+as `response_format` on every request:
+the answer is constrained at the wire level, not only by the prompt. Structured
+outputs are required with no fallback (see the `llm*` notes in
+[Configuration](#configuration)): a provider or model that cannot enforce the
+schema cannot serve this project. Parsing — tolerant of an unwrapped answer or a
+wrapper code fence — lives on `llm/TranslationOutput.kt`.

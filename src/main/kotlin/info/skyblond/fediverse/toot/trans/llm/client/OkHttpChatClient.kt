@@ -291,4 +291,21 @@ class ChatApiException(
     val detail: String,
     val errorType: String? = null,
     val errorCode: String? = null,
-) : RuntimeException("HTTP $httpCode: $detail")
+) : RuntimeException("HTTP $httpCode: $detail") {
+    companion object {
+        /**
+         * HTTP codes that mark the request payload itself as the problem:
+         * bad request (400), payload too large (413), unsupported media
+         * type (415) and unprocessable entity (422). Deliberately narrow:
+         * 401/402/403/404 are credential, quota or model configuration
+         * problems, for which a smaller payload cannot succeed.
+         *
+         * Single source of truth for the two consumers of the
+         * distinction: `Translator`'s ladder downgrades the request
+         * variant on these codes, while a rejection surviving the whole
+         * ladder is permanent for that toot in `TranslationProcessor`.
+         * The two policies must not drift apart.
+         * */
+        val PAYLOAD_REJECTION_HTTP_CODES = setOf(400, 413, 415, 422)
+    }
+}

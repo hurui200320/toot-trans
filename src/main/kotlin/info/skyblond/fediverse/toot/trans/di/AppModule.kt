@@ -1,12 +1,17 @@
 package info.skyblond.fediverse.toot.trans.di
 
+import info.skyblond.fediverse.toot.trans.TranslationProcessor
 import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.EnvConfigProvider
 import info.skyblond.fediverse.toot.trans.config.file.PropertiesConfigProvider
 import info.skyblond.fediverse.toot.trans.config.requireValidCooldown
+import info.skyblond.fediverse.toot.trans.config.requireValidMaxCompletionTokens
+import info.skyblond.fediverse.toot.trans.config.requireValidReplyChainDepth
 import info.skyblond.fediverse.toot.trans.config.requireValidRetryDelay
 import info.skyblond.fediverse.toot.trans.config.requireValidTransientMaxRetry
+import info.skyblond.fediverse.toot.trans.llm.TranslationRequestFactory
+import info.skyblond.fediverse.toot.trans.llm.Translator
 import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.RetryingChatClient
@@ -16,12 +21,15 @@ import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.OkHttpAccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.media.MediaLoader
+import info.skyblond.fediverse.toot.trans.masto.client.media.OkHttpMediaLoader
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
 import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
-import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
+import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
+import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,20 +49,42 @@ import kotlin.time.toJavaDuration
  * The Koin container's module: the whole application object graph.
  *
  * The module is parameterized by the resolved [ConfigStore] (see
- * [appConfigStore]): every definition constructs its object directly,
- * pulling container dependencies with `get()` and plain values from
- * [config], so a missing or invalid value fails the resolution of the
- * dependents (fail-fast) instead of producing a half-configured object.
+ * [appConfigStore]) and by the environment lookup [env] used for the
+ * conventional proxy variables (see [proxyFromEnv]; injectable so
+ * tests can keep the host's proxy setup out of their containers):
+ * every definition constructs its object directly, pulling container
+ * dependencies with `get()` and plain values from [config], so a
+ * missing or invalid value fails the resolution of the dependents
+ * (fail-fast) instead of producing a half-configured object.
  *
  * The one exception is [CredentialAccount]: it is fetched from the
  * instance at first resolution, so a rejected access token fails the
  * resolution itself, not just the first API consumer — see that
  * definition for the blocking resolution contract.
  * */
-fun appModule(config: ConfigStore): Module = module {
+fun appModule(
+    config: ConfigStore,
+    env: (String) -> String? = System::getenv,
+): Module = module {
+    // koin's module DSL has its own `logger`; the FQN calls below use the
+    // application logger instead
     // one client shared by every API component, so its connection pool
-    // and threads are not duplicated per definition
-    single<OkHttpClient> { OkHttpClient.Builder().build() }
+    // and threads are not duplicated per definition; the proxy follows
+    // the conventional environment variables (see [proxyFromEnv]), and
+    // the LLM transport, which derives from this client with newBuilder,
+    // inherits it together with the pool
+    single<OkHttpClient> {
+        val httpProxy = proxyFromEnv(env)
+        if (httpProxy == null) {
+            info.skyblond.fediverse.toot.trans.logger.info { "No proxy configured, connecting directly" }
+        } else {
+            info.skyblond.fediverse.toot.trans.logger.info { "Using proxy: $httpProxy" }
+        }
+        OkHttpClient.Builder()
+            .apply { httpProxy?.let { proxy(it) } }
+            .build()
+    }
+
 
     // shared transport for the instance API
     single<MastoApiClient> {
@@ -125,6 +155,59 @@ fun appModule(config: ConfigStore): Module = module {
         StatusesDeleter(get(), get(), get())
     }
 
+    // downloads the current toot's images for the vision input; media
+    // URLs are served publicly, so the shared client is used without
+    // auth, and the caps live on the interface
+    single<MediaLoader> {
+        OkHttpMediaLoader(get())
+    }
+
+    // builds the translation request variants; the llm* settings are
+    // read here, so the stage that consumes them fails fast on a
+    // missing model or an invalid token budget, naming the setting
+    single<TranslationRequestFactory> {
+        TranslationRequestFactory(
+            targetLanguage = config.targetLanguage,
+            model = config.llmModel,
+            reasoningEffort = config.llmReasoningEffort,
+            maxCompletionTokens = requireValidMaxCompletionTokens(
+                "Config `llmMaxCompletionTokens`",
+                config.llmMaxCompletionTokens,
+            ),
+            extraParameter = config.llmReqExtra,
+        )
+    }
+
+    // walks the request ladder over the retrying chat client
+    single<Translator> {
+        Translator(get(), get())
+    }
+
+    // the reply-chain context builder; the depth config is validated
+    // here through the predicate shared with the component's own
+    // constructor check, naming `replyChainDepth`
+    single<ReplyChainContext> {
+        ReplyChainContext(
+            queue = get(),
+            pool = get(),
+            statusesClient = get(),
+            mediaLoader = get(),
+            maxDepth = requireValidReplyChainDepth("Config `replyChainDepth`", config.replyChainDepth),
+        )
+    }
+
+    // the queue drain: context -> translate -> log, with the failure
+    // policy documented on TranslationProcessor
+    single<TranslationProcessor> {
+        TranslationProcessor(
+            queue = get(),
+            cooldown = get(),
+            deleter = get(),
+            contextBuilder = get(),
+            translator = get(),
+        )
+    }
+
     // the LLM chat client: the OkHttp transport (which owns no client,
     // see [OkHttpChatClient]) wrapped in the transient-retry policy, so
     // the graph's ChatClient is always the retrying one. The transport's
@@ -183,7 +266,6 @@ fun appModule(config: ConfigStore): Module = module {
         runBlocking(Dispatchers.IO) {
             accountsClient.verifyCredentials()
         }.also {
-            // koin has built-in logger, not the one we want
             info.skyblond.fediverse.toot.trans.logger.info {
                 "Logged in as ${it.username}, user id: ${it.id}"
             }

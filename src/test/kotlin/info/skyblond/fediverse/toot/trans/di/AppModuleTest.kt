@@ -1,9 +1,12 @@
 package info.skyblond.fediverse.toot.trans.di
 
+import info.skyblond.fediverse.toot.trans.TranslationProcessor
 import info.skyblond.fediverse.toot.trans.config.ConfigProvider
 import info.skyblond.fediverse.toot.trans.config.ConfigStore
 import info.skyblond.fediverse.toot.trans.config.DefaultConfigProvider
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
+import info.skyblond.fediverse.toot.trans.llm.Translator
+import info.skyblond.fediverse.toot.trans.llm.TranslationRequestFactory
 import info.skyblond.fediverse.toot.trans.llm.client.ChatApiException
 import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
 import info.skyblond.fediverse.toot.trans.llm.client.ChatCompletionRequest
@@ -16,10 +19,12 @@ import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.CredentialAccount
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.OkHttpAccountsClient
+import info.skyblond.fediverse.toot.trans.masto.client.media.MediaLoader
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.OkHttpStatusesClient
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
 import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
+import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.coroutines.CancellationException
@@ -30,17 +35,22 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.OkHttpClient
 import org.junit.jupiter.api.io.TempDir
 import org.koin.core.KoinApplication
 import org.koin.core.error.InstanceCreationException
 import org.koin.dsl.koinApplication
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Proxy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -116,10 +126,16 @@ class AppModuleTest {
 
     /**
      * Start a standalone container on the given config; a fresh module
-     * per call, so the definitions close over exactly that config.
+     * per call, so the definitions close over exactly that config. The
+     * environment defaults to empty, so the host's proxy variables
+     * (`HTTPS_PROXY` and friends) cannot route the stand-in instance
+     * connections through a proxy; the proxy tests pass their own.
      * */
-    private fun appWith(config: ConfigStore): KoinApplication =
-        koinApplication { modules(appModule(config)) }
+    private fun appWith(
+        config: ConfigStore,
+        env: (String) -> String? = emptyMap<String, String>()::get,
+    ): KoinApplication =
+        koinApplication { modules(appModule(config, env)) }
 
     /**
      * Run [block] and return the failure it throws, unwrapping Koin's
@@ -656,6 +672,155 @@ class AppModuleTest {
             }
         } finally {
             server.close()
+        }
+    }
+
+    /**
+     * The translation stage resolves as one graph: media loader,
+     * request factory, translator, context builder and the
+     * queue-draining processor. The account-dependent nodes come from
+     * the stand-in instance, like the [PendingQueue] test above.
+     * */
+    @Test
+    fun `resolves the translation stage with a complete config`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueueJson(200, """{"id": "14715", "username": "trwnh"}""")
+            val app = appWith(
+                configWith(
+                    mastoHost = server.url("/").toString(), accessToken = testToken,
+                    targetLanguage = "English", targetLangCode = "en",
+                    llmBaseUrl = "https://llm.example/v1", llmApiKey = "llm-key",
+                    llmModel = "test-model", llmMaxCompletionTokens = 1024,
+                )
+            )
+            try {
+                assertIs<MediaLoader>(app.koin.get<MediaLoader>())
+                assertIs<TranslationRequestFactory>(app.koin.get<TranslationRequestFactory>())
+                assertIs<Translator>(app.koin.get<Translator>())
+                assertIs<ReplyChainContext>(app.koin.get<ReplyChainContext>())
+                assertIs<TranslationProcessor>(app.koin.get<TranslationProcessor>())
+            } finally {
+                app.close()
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    /**
+     * The model name and token budget are only consumed by the
+     * translation stage; the definition reads them, so a config
+     * without them fails at resolution naming the setting instead of
+     * at the first completion.
+     * */
+    @Test
+    fun `missing llm model fails the translation stage naming the setting`() {
+        val app = appWith(
+            configWith(
+                targetLanguage = "English", targetLangCode = "en",
+                llmBaseUrl = "https://llm.example/v1", llmApiKey = "llm-key",
+            )
+        )
+        try {
+            val error = assertFailsFast { app.koin.get<TranslationRequestFactory>() }
+            assertIs<MissingConfigException>(error)
+            assertTrue(error.message!!.contains("llm model"))
+        } finally {
+            app.close()
+        }
+    }
+
+    /**
+     * The token budget is validated at the definition through the
+     * predicate shared with the factory, so a non-positive value fails
+     * naming `llmMaxCompletionTokens` instead of surfacing as a
+     * per-toot request-construction failure at the first completion.
+     * */
+    @Test
+    fun `invalid llm max completion tokens fails the translation stage naming the setting`() {
+        val app = appWith(
+            configWith(
+                targetLanguage = "English", targetLangCode = "en",
+                llmBaseUrl = "https://llm.example/v1", llmApiKey = "llm-key",
+                llmModel = "test-model", llmMaxCompletionTokens = 0,
+            )
+        )
+        try {
+            val error = assertFailsFast { app.koin.get<TranslationRequestFactory>() }
+            assertIs<IllegalArgumentException>(error)
+            assertTrue(error.message!!.contains("llmMaxCompletionTokens"))
+        } finally {
+            app.close()
+        }
+    }
+
+    /**
+     * The depth validation runs at the definition through the
+     * predicate shared with the component, so the error names
+     * `replyChainDepth`; dropping it would surface the component's own
+     * parameter-named error instead.
+     * */
+    @Test
+    fun `invalid reply chain depth fails the context builder naming the setting`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueueJson(200, """{"id": "14715", "username": "trwnh"}""")
+            val app = appWith(
+                configWith(
+                    mastoHost = server.url("/").toString(), accessToken = testToken,
+                    targetLangCode = "en", replyChainDepth = -1,
+                )
+            )
+            try {
+                val error = assertFailsFast { app.koin.get<ReplyChainContext>() }
+                assertIs<IllegalArgumentException>(error)
+                assertTrue(error.message!!.contains("replyChainDepth"))
+            } finally {
+                app.close()
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    /**
+     * The shared client's proxy comes from the conventional environment
+     * variables (see [proxyFromEnv]): dropping the wiring would silently
+     * send traffic outside the configured proxy, and nothing else would
+     * fail.
+     * */
+    @Test
+    fun `the shared client picks up the proxy from the environment`() {
+        val app = appWith(
+            configWith(mastoHost = testHost, accessToken = testToken),
+            env = mapOf("HTTPS_PROXY" to "http://127.0.0.1:3128")::get,
+        )
+        try {
+            val resolved = assertNotNull(app.koin.get<OkHttpClient>().proxy)
+            assertEquals(Proxy.Type.HTTP, resolved.type())
+            val address = assertIs<InetSocketAddress>(resolved.address())
+            assertEquals("127.0.0.1", address.hostString)
+            assertEquals(3128, address.port)
+        } finally {
+            app.close()
+        }
+    }
+
+    /**
+     * The other end: with no proxy variable the client connects
+     * directly. The empty environment is [appWith]'s default, which
+     * also keeps this machine's proxy variables out of every test.
+     * */
+    @Test
+    fun `the shared client connects directly without proxy variables`() {
+        val app = appWith(configWith(mastoHost = testHost, accessToken = testToken))
+        try {
+            assertNull(app.koin.get<OkHttpClient>().proxy)
+        } finally {
+            app.close()
         }
     }
 }

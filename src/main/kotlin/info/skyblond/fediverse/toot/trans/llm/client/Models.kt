@@ -266,14 +266,72 @@ enum class ReasoningEffort {
 }
 
 /**
+ * Value of the `response_format` request field: how the provider constrains the
+ * answer's shape.
+ *
+ * Structured outputs ([JsonSchema]) are a requirement of this project: the
+ * translation stage sends the strict schema on every request, and a provider or
+ * model that cannot enforce the schema cannot serve a deployment. The protocol's
+ * other response formats (`text`, `json_object`) are deliberately not modeled;
+ * the hierarchy stays sealed because its polymorphic serializer is what turns
+ * the [SerialName] into the wire `type` discriminator, e.g.
+ * `{"type": "json_schema", ...}`.
+ * */
+@Serializable
+sealed interface ResponseFormat {
+    /** `{"type": "json_schema", "json_schema": {...}}`: shape-guaranteed output. */
+    @Serializable
+    @SerialName("json_schema")
+    data class JsonSchema(
+        @SerialName("json_schema") val jsonSchema: JsonSchemaSpec,
+    ) : ResponseFormat
+}
+
+/**
+ * The `json_schema` payload of [ResponseFormat.JsonSchema]: [name] labels the
+ * schema, [schema] is the JSON Schema itself, and [strict] asks the provider to
+ * enforce it exactly.
+ *
+ * [schema] must stay inside the structured-outputs subset every provider
+ * follows: each object needs `additionalProperties: false`, every property must
+ * be listed in `required`, and an optional value is a nullable type
+ * (`"type": ["string", "null"]`), not an omitted field. The caller owns that
+ * contract; this model only validates its own fields.
+ * https://developers.openai.com/api/docs/guides/structured-outputs
+ * */
+@Serializable
+data class JsonSchemaSpec(
+    val name: String,
+    val description: String? = null,
+    @SerialName("strict") val strict: Boolean? = null,
+    val schema: JsonObject,
+) {
+    init {
+        require(SCHEMA_NAME_PATTERN.matches(name)) {
+            "name must match ${SCHEMA_NAME_PATTERN.pattern}, got `$name`"
+        }
+        require(schema.isNotEmpty()) { "schema must not be empty" }
+    }
+
+    companion object {
+        /**
+         * The schema-name charset the providers accept.
+         * */
+        private val SCHEMA_NAME_PATTERN = Regex("[a-zA-Z0-9_-]{1,64}")
+    }
+}
+
+/**
  * Body of a Chat Completions request; wire docs live on [ChatClient].
  *
  * Only the fields this project needs are modeled. Deliberately absent (pass
  * provider-specific knobs through [extra]): sampling parameters (`temperature`,
  * `top_p`, `seed`, penalties) because current reasoning models reject or ignore
  * them; `max_tokens`, deprecated and incompatible with o-series models, replaced by
- * [maxCompletionTokens]; tools/function calling, audio, logprobs and response
- * formats, none of which a translation flow consumes.
+ * [maxCompletionTokens]; tools/function calling, audio and logprobs, none of
+ * which a translation flow consumes. `response_format` is modeled as
+ * [responseFormat] because the translation flow must send it on every request
+ * (see [ResponseFormat]).
  * */
 @Serializable
 data class ChatCompletionRequest(
@@ -297,6 +355,13 @@ data class ChatCompletionRequest(
 
     /** Reasoning depth, see [ReasoningEffort]; omitted from the wire when null. */
     @SerialName("reasoning_effort") val reasoningEffort: ReasoningEffort? = null,
+
+    /**
+     * Output constraint for the answer, see [ResponseFormat]; omitted from the
+     * wire when null. Optional at this layer, but the translation stage always
+     * sets the strict [ResponseFormat.JsonSchema] on every request.
+     * */
+    @SerialName("response_format") val responseFormat: ResponseFormat? = null,
 
     /**
      * Provider-specific top-level body fields merged in after the standard ones
@@ -337,10 +402,12 @@ data class ChatCompletionRequest(
         /**
          * Top-level body fields this client owns: [ChatCompletionRequest.model],
          * [ChatCompletionRequest.messages], [ChatCompletionRequest.maxCompletionTokens],
-         * [ChatCompletionRequest.reasoningEffort], and the transport-pinned `stream`.
+         * [ChatCompletionRequest.reasoningEffort],
+         * [ChatCompletionRequest.responseFormat], and the transport-pinned `stream`.
          * [extra] must not name any of them.
          * */
-        val RESERVED_KEYS = setOf("model", "messages", "max_completion_tokens", "reasoning_effort", "stream")
+        val RESERVED_KEYS =
+            setOf("model", "messages", "max_completion_tokens", "reasoning_effort", "response_format", "stream")
 
         /**
          * Rejects [extra] keys that collide with [RESERVED_KEYS]. Called by the

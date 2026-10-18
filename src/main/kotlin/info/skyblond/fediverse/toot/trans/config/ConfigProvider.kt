@@ -78,6 +78,11 @@ interface ConfigProvider {
      * */
     val transientRetryDelay: Duration?
 
+    // TODO: add a cutoff for old toots.
+    //       still big initial scan, but don't post translations
+    //       for really old toots, so user won't suddenly see a
+    //       translation for toots days ago
+
     /**
      * Delay after creation/edit before a toot is eligible; zero disables it.
      * The cooldown timing contract lives on `Cooldown` in

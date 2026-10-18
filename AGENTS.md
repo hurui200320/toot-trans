@@ -44,22 +44,37 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
   time `editedAt ?: createdAt`); single-sources the default cooldown.
 - `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
   chain, instance API transport, statuses pool, pending queue, cooldown,
-  the application coroutine scope, and the LLM chat client.
-- `filter/TootFilter.kt`: parked (deprecated, wired nowhere) reference for
-  the future ancestry-context stage. The runtime eligibility lives in
-  `PendingQueue.kt`.
+  the application coroutine scope, the LLM chat client and the translation
+  stage.
+- `di/ProxyFromEnv.kt`: the shared OkHttp client's proxy, resolved from
+  the conventional environment variables (`HTTPS_PROXY` and friends).
 - `masto/statuses/TranslationChain.kt`: in-memory reconstruction and
   classification of an original's translation chain.
+- `masto/statuses/ReplyChainContext.kt`: the LLM context builder: ancestor
+  walk via the pool, source fetches, translated-ancestor resolution and the
+  bounded target media downloads.
+- `TranslationProcessor.kt`: the queue drain and its failure policy: the
+  orchestrator `Main.kt` runs after each scan.
 - `masto/client/`: instance API wire layer over `MastoApiClient.kt`, split
-  into `accounts/` and `statuses/`: contracts, OkHttp transports and the
-  wire models (including `FetchedStatus`'s fetch timestamp).
+  into `accounts/`, `statuses/` and `media/`: contracts, OkHttp transports
+  and the wire models (including `FetchedStatus`'s fetch timestamp).
 - `llm/client/ChatClient.kt`: stateless, non-streaming Chat Completions
   contract; entry point for the wire documentation.
 - `llm/client/OkHttpChatClient.kt`: direct transport: endpoint derivation,
   error-body mapping and injected-client timeouts.
 - `llm/client/RetryingChatClient.kt`: fixed-delay retry policy for transient
-  failures.
+  failures; also single-sources `ChatApiException.isRetryable`.
 - `llm/client/Models.kt`: Chat Completions wire models.
+- `llm/Footer.kt`: the `🌐{hash}#{seq}#{total}` reply marker: rendering,
+  matching and stripping.
+- `llm/TranslationRequestFactory.kt`: the prompt contract (JSON answer shape,
+  history pairing, context blocks), the always-sent strict `response_format`
+  schema and the three request variants of the ladder.
+- `llm/Translator.kt`: the request ladder over `ChatClient` plus the
+  answer's spoiler policy.
+- `llm/TranslationOutput.kt`: parsing of the JSON answer contract.
+- `llm/TranslationContext.kt`: the prompt input types and the
+  `<missing translation>` / `<empty content>` placeholders.
 
 ## Architecture
 
@@ -74,6 +89,13 @@ The object graph is wired with Koin in the `di` package:
 
 For LLM translation, this project accepts standard OpenAI compatible
 chat completion API settings.
+
+The translation stage is the queue drain `TranslationProcessor.kt` runs:
+context (`masto/statuses/ReplyChainContext.kt`) → translate
+(`llm/Translator.kt`) → log. Posting the translation as a reply chain is not
+implemented yet: the finished translation is logged for review and the entry
+is dropped. Periodic polling is not implemented yet: `Main.kt` scans once,
+drains, and exits.
 
 ## Mastodon rate limits
 
@@ -90,7 +112,7 @@ exhausted bucket returns HTTP 429. This project's traffic touches:
 | 300 req / 5 min | per access token | every API call |
 | 1500 req / 5 min | per account | every API call (all tokens combined) |
 | 300 req / 15 min | per account, paging | any request with `since_id`/`max_id`/`min_id`/`page` (our polling) |
-| 30 req / 30 min | per account | `DELETE /statuses/:id` — cleanup of half-posted translation reply chains |
+| 30 req / 30 min | per account | `DELETE /statuses/:id` — cleanup of obsolete translation reply chains |
 
 - Responses (including successful ones) carry `X-RateLimit-Limit` /
   `X-RateLimit-Remaining` / `X-RateLimit-Reset` for the bucket closest to

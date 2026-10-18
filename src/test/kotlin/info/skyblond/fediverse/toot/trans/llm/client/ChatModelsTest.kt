@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans.llm.client
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -223,6 +224,54 @@ class ChatModelsTest {
         assertEquals(
             listOf("system", "user", "assistant", "user"),
             element.jsonArray.map { it.jsonObject.getValue("role").jsonPrimitive.content },
+        )
+    }
+
+    @Test
+    fun `response format serializes to the json_schema wire shape`() {
+        val schema = JsonSchemaSpec(
+            name = "translation",
+            strict = true,
+            schema = buildJsonObject { put("type", "object") },
+        )
+
+        assertEquals(
+            """{"type":"json_schema","json_schema":{"name":"translation","strict":true,"schema":{"type":"object"}}}""",
+            json.encodeToString(ResponseFormat.serializer(), ResponseFormat.JsonSchema(schema)),
+        )
+    }
+
+    @Test
+    fun `json schema spec validates its name and schema`() {
+        val schema = buildJsonObject { put("type", "object") }
+        assertFailsWith<IllegalArgumentException> { JsonSchemaSpec("", schema = schema) }
+        assertFailsWith<IllegalArgumentException> { JsonSchemaSpec("has space", schema = schema) }
+        assertFailsWith<IllegalArgumentException> { JsonSchemaSpec("x".repeat(65), schema = schema) }
+        assertFailsWith<IllegalArgumentException> { JsonSchemaSpec("ok", schema = JsonObject(emptyMap())) }
+    }
+
+    @Test
+    fun `response_format is omitted when unset and serialized when set`() {
+        val base = ChatCompletionRequest(model = "m", messages = listOf(ChatMessage.user("hi")))
+        assertFalse(
+            json.encodeToJsonElement(ChatCompletionRequest.serializer(), base)
+                .jsonObject.containsKey("response_format")
+        )
+
+        val schema = JsonSchemaSpec(
+            name = "translation",
+            strict = true,
+            schema = buildJsonObject { put("type", "object") },
+        )
+        val element = json.encodeToJsonElement(
+            ChatCompletionRequest.serializer(),
+            base.copy(responseFormat = ResponseFormat.JsonSchema(schema)),
+        )
+        val responseFormat = element.jsonObject.getValue("response_format").jsonObject
+        assertEquals("json_schema", responseFormat.getValue("type").jsonPrimitive.content)
+        assertEquals(
+            "translation",
+            responseFormat.getValue("json_schema").jsonObject.getValue("name").jsonPrimitive.content,
         )
     }
 }
