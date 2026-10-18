@@ -300,7 +300,7 @@ class PendingQueueTest {
     }
 
     @Test
-    fun `translation chain state is classified from the current window`() = runTest {
+    fun `chain state is classified from the window merged with the pool snapshot`() = runTest {
         val p = original()
         val t = translation("T")
         val f = PendingQueueFixture(this, listOf(p, t))
@@ -308,11 +308,54 @@ class PendingQueueTest {
         val translated = assertIs<TranslationChainState.Translated>(f.queue.findTranslationChainState(p))
         assertEquals(listOf("T"), translated.chain.segments.map { it.first.id })
 
-        // a segment outside the window (dropped here) is invisible to the
-        // classification, see findTranslationChainState's input contract
+        // dropping the segment from the window does not hide it: the drop
+        // is not a deletion, and the pool still holds the observation
         f.queue.drop("T")
+        assertIs<TranslationChainState.Translated>(f.queue.findTranslationChainState(p))
+
+        // once the pool forgets it too (the deletion path), the segment is
+        // invisible to the classification
+        f.pool.invalidate("T")
         val needs = assertIs<TranslationChainState.NeedsTranslation>(f.queue.findTranslationChainState(p))
         assertEquals(TranslationChainState.Reason.ABSENT, needs.reason)
+    }
+
+    @Test
+    fun `pool-only statuses are chain material`() = runTest {
+        val p = original()
+        val f = PendingQueueFixture(this, listOf(p))
+        f.feed()
+        // never fed into the queue, only observed by the pool
+        f.pool.seed(listOf(fetched(translation("T"))))
+        val translated = assertIs<TranslationChainState.Translated>(f.queue.findTranslationChainState(p))
+        assertEquals(listOf("T"), translated.chain.segments.map { it.first.id })
+    }
+
+    @Test
+    fun `the newest fetch wins when the window and the pool know the same id`() = runTest {
+        val p = original()
+        val t = translation("T")
+        val f = PendingQueueFixture(this, listOf(p, t))
+        f.feed()
+        assertIs<TranslationChainState.Translated>(f.queue.findTranslationChainState(p))
+
+        // a later observation retags the toot away from the target
+        // language: the stale queued copy must not be used
+        f.pool.seed(listOf(fetched(t.copy(language = "ja"), at = now.plusSeconds(60))))
+        val needs = assertIs<TranslationChainState.NeedsTranslation>(f.queue.findTranslationChainState(p))
+        assertEquals(TranslationChainState.Reason.ABSENT, needs.reason)
+    }
+
+    @Test
+    fun `an exact fetch-time tie keeps the queued copy`() = runTest {
+        val p = original()
+        val t = translation("T")
+        val f = PendingQueueFixture(this, listOf(p, t))
+        f.feed()
+        // same fetchedAt as the queued copy: the window copy wins the tie
+        f.pool.seed(listOf(fetched(t.copy(language = "ja"), at = now)))
+        val translated = assertIs<TranslationChainState.Translated>(f.queue.findTranslationChainState(p))
+        assertEquals(listOf("T"), translated.chain.segments.map { it.first.id })
     }
 
     @Test

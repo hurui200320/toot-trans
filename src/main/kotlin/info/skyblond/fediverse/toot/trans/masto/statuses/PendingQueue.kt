@@ -203,17 +203,34 @@ class PendingQueue(
     }
 
     /**
-     * Find the translation chain state of [status] against the current
-     * window: a snapshot of the queued statuses, classified by the pure
-     * [findTranslationChainState]. Segments outside the window are
-     * invisible, see that function's input contract.
+     * Find the translation chain state of [status] by classifying the
+     * queued window merged with the pool's cached observations
+     * ([StatusesCachePool.dump]): one copy per id, the newer
+     * [FetchedStatus.fetchedAt] winning, a tie keeping the queued copy.
+     *
+     * The merge matters because the queue is a work list, not the source
+     * of truth: a drop only removes an entry from the window (see
+     * [drop]), so a status the caller has already processed still exists
+     * on the instance and must stay visible through the pool, and a
+     * queued copy is refreshed whenever the pool holds a newer fetch of
+     * the same id. The classification rules themselves live in the pure
+     * [findTranslationChainState].
      * */
     suspend fun findTranslationChainState(
         status: Status
     ): TranslationChainState {
-        // TODO: merge with pool.dump(), pick the newest fetch on same id
-        val statuses = mutex.withLock { toots.toList() }.map { it.status }
-        return findTranslationChainState(status.id, statuses, targetLangCode)
+        val newestById = LinkedHashMap<String, FetchedStatus>()
+        // the window copy comes first, so it wins a fetched-at tie
+        mutex.withLock {
+            toots.forEach { newestById[it.status.id] = it }
+        }
+        cachePool.dump().forEach { fetched ->
+            val known = newestById[fetched.status.id]
+            if (known == null || fetched.fetchedAt > known.fetchedAt) {
+                newestById[fetched.status.id] = fetched
+            }
+        }
+        return findTranslationChainState(status.id, newestById.values.map { it.status }, targetLangCode)
     }
 
     /**

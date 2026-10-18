@@ -18,7 +18,8 @@ as to the code, they are already in English.
 
 The application currently performs one startup scan, feeds the pending
 queue (`masto/statuses/PendingQueue.kt`), and reconstructs each original's
-existing translation chain from the queued statuses (see
+existing translation chain from the work window merged with the status
+pool's cached observations, newest fetch per ID (see
 `masto/statuses/TranslationChain.kt`). The queue is the work window: `feed`
 runs the entrance filter, `next` hands out the oldest entry, and `drop`
 removes a processed one. Dropping the queue head records it as the rolling
