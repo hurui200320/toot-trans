@@ -53,7 +53,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 class AppModuleTest {
@@ -82,6 +84,7 @@ class AppModuleTest {
         targetLanguage: String? = null,
         targetLangCode: String? = null,
         translationCooldown: Duration? = null,
+        translationMaxAge: Duration? = null,
         replyChainDepth: Int? = null,
         llmBaseUrl: String? = null,
         llmApiKey: String? = null,
@@ -109,6 +112,7 @@ class AppModuleTest {
                 override val targetLanguage: String? = targetLanguage
                 override val targetLangCode: String? = targetLangCode
                 override val translationCooldown: Duration? = translationCooldown
+                override val translationMaxAge: Duration? = translationMaxAge
                 override val replyChainDepth: Int? = replyChainDepth
                 override val llmBaseUrl: String? = llmBaseUrl
                 override val llmApiKey: String? = llmApiKey
@@ -445,6 +449,108 @@ class AppModuleTest {
             assertIs<Cooldown>(app.koin.get<Cooldown>())
         } finally {
             app.close()
+        }
+    }
+
+    /**
+     * The max-age cutoff is validated at the queue definition through the
+     * predicate shared with `PendingQueue`'s constructor, so a bad value
+     * fails naming `translationMaxAge` instead of the component's
+     * parameter name. Resolving the queue resolves the account first,
+     * hence the stand-in instance.
+     * */
+    @Test
+    fun `invalid translation max age fails queue resolution naming the setting`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            for (bad in listOf((-1).seconds, Duration.INFINITE)) {
+                server.enqueueJson(200, """{"id": "14715", "username": "trwnh"}""")
+                val app = appWith(
+                    configWith(
+                        mastoHost = server.url("/").toString(), accessToken = testToken,
+                        targetLangCode = "en", translationMaxAge = bad,
+                    )
+                )
+                try {
+                    val error = assertIs<IllegalArgumentException>(assertFailsFast { app.koin.get<PendingQueue>() })
+                    assertTrue(
+                        error.message!!.contains("translationMaxAge"),
+                        "error must name translationMaxAge: ${error.message}",
+                    )
+                } finally {
+                    app.close()
+                }
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    /**
+     * The accepting end of the cooldown/cutoff consistency check: the
+     * check only applies when both bounds are enabled, so any pair with
+     * `0s` on either side must resolve, and so must a valid strict pair.
+     * */
+    @Test
+    fun `disabled cooldown or max age bounds resolve the queue`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val accepted = listOf(
+                Duration.ZERO to Duration.ZERO,
+                Duration.ZERO to 1.days,
+                1.days to Duration.ZERO,
+                1.minutes to 1.days,
+            )
+            for ((cooldown, maxAge) in accepted) {
+                server.enqueueJson(200, """{"id": "14715", "username": "trwnh"}""")
+                val app = appWith(
+                    configWith(
+                        mastoHost = server.url("/").toString(), accessToken = testToken,
+                        targetLangCode = "en", translationCooldown = cooldown, translationMaxAge = maxAge,
+                    )
+                )
+                try {
+                    assertIs<PendingQueue>(app.koin.get<PendingQueue>())
+                } finally {
+                    app.close()
+                }
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    /**
+     * The rejecting end: with both bounds enabled, a cooldown at or
+     * above the cutoff leaves no eligible age window — every toot is
+     * blocked by the cooldown until the cutoff rejects it — so the
+     * queue definition fails naming both settings.
+     * */
+    @Test
+    fun `a cooldown at or above the cutoff fails queue resolution naming both settings`() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            for ((cooldown, maxAge) in listOf(1.days to 1.days, 2.days to 1.days)) {
+                server.enqueueJson(200, """{"id": "14715", "username": "trwnh"}""")
+                val app = appWith(
+                    configWith(
+                        mastoHost = server.url("/").toString(), accessToken = testToken,
+                        targetLangCode = "en", translationCooldown = cooldown, translationMaxAge = maxAge,
+                    )
+                )
+                try {
+                    val error = assertIs<IllegalArgumentException>(assertFailsFast { app.koin.get<PendingQueue>() })
+                    assertTrue(error.message!!.contains("translationMaxAge"))
+                    assertTrue(error.message!!.contains("translationCooldown"))
+                } finally {
+                    app.close()
+                }
+            }
+        } finally {
+            server.close()
         }
     }
 

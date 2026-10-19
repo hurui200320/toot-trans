@@ -59,6 +59,9 @@ class ConfigStore(
     override val translationCooldown: Duration
         get() = getOrThrow("translation cooldown") { it.translationCooldown }
 
+    override val translationMaxAge: Duration
+        get() = getOrThrow("translation max age") { it.translationMaxAge }
+
     override val replyChainDepth: Int
         get() = getOrThrow("reply chain depth") { it.replyChainDepth }
 

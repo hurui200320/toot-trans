@@ -48,6 +48,20 @@ fun requireValidCooldown(name: String, value: Duration): Duration {
 }
 
 /**
+ * Shared predicate of the translation max-age contract: the cutoff must
+ * be finite and non-negative, where 0 disables it (see `PendingQueue` in
+ * `masto/statuses/PendingQueue.kt`). Consumers: `PendingQueue`'s
+ * constructor, so a programmatic value fails at the component, and
+ * `di/AppModule.kt`, so a config value fails naming the setting.
+ * */
+fun requireValidTranslationMaxAge(name: String, value: Duration): Duration {
+    require(value.isFinite() && !value.isNegative()) {
+        "$name must be finite and non-negative, got $value"
+    }
+    return value
+}
+
+/**
  * Shared predicate of the reply-chain depth contract: the depth must
  * be non-negative, where 0 disables the LLM history. Consumers:
  * `ReplyChainContext`'s constructor, so a programmatic value fails at

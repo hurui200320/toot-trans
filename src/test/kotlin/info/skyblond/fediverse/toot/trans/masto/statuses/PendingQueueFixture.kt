@@ -7,6 +7,7 @@ import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusSource
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import kotlinx.coroutines.test.TestScope
 import java.time.Instant
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -15,7 +16,11 @@ import kotlin.time.Duration.Companion.milliseconds
  * instance, so tests can prove ancestry reads stayed local to the seeded
  * cache.
  * */
-internal class PendingQueueFixture(scope: TestScope, statuses: List<Status>) {
+internal class PendingQueueFixture(
+    scope: TestScope,
+    statuses: List<Status>,
+    maxAge: Duration = PendingQueue.DEFAULT_MAX_AGE,
+) {
     val remote = statuses.associateBy { it.id }.toMutableMap()
     val lookups = mutableListOf<Set<String>>()
     var fetch: suspend (Set<String>) -> List<FetchedStatus> = { ids ->
@@ -35,7 +40,7 @@ internal class PendingQueueFixture(scope: TestScope, statuses: List<Status>) {
         client, scope.backgroundScope, batchWindow = 1.milliseconds,
         timeSource = scope.testScheduler.timeSource,
     )
-    val queue = PendingQueue(owner.id, "en", pool)
+    val queue = PendingQueue(owner.id, "en", pool, maxAge)
 
     /**
      * Feed [statuses] (all of [remote] by default) as fetched at

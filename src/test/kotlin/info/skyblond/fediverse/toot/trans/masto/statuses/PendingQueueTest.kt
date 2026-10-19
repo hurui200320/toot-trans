@@ -11,6 +11,9 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * The entrance filter ([PendingQueue.feed]), the work window mechanics
@@ -68,6 +71,83 @@ class PendingQueueTest {
         f.feed()
         assertEquals(listOf("cw"), f.drain().map { it.id })
         assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `originals older than the cutoff at fetch time are skipped while younger ones are queued`() = runTest {
+        // boundary: exactly at the cutoff passes, one second older does not
+        val statuses = listOf(
+            original("too-old").copy(createdAt = now.minusSeconds(601)),
+            original("boundary").copy(createdAt = now.minusSeconds(600)),
+            original("young").copy(createdAt = now.minusSeconds(300)),
+        )
+        val f = PendingQueueFixture(this, statuses, maxAge = 10.minutes)
+        f.feed()
+        assertEquals(listOf("boundary", "young"), f.drain().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `an edit resets the age to the edit time`() = runTest {
+        val justEdited = original().copy(createdAt = now.minusSeconds(7200), editedAt = now.minusSeconds(300))
+        val staleEdit = original("old").copy(createdAt = now.minusSeconds(7200), editedAt = now.minusSeconds(601))
+        val f = PendingQueueFixture(this, listOf(justEdited, staleEdit), maxAge = 10.minutes)
+        f.feed()
+        // the first edit counts as current, the second one is already past the cutoff
+        assertEquals(listOf("P"), f.drain().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `a future creation time counts as young`() = runTest {
+        val future = original().copy(createdAt = now.plusSeconds(60))
+        val f = PendingQueueFixture(this, listOf(future), maxAge = 10.minutes)
+        f.feed()
+        assertEquals(listOf("P"), f.drain().map { it.id })
+    }
+
+    @Test
+    fun `a zero max age disables the cutoff`() = runTest {
+        val ancient = original().copy(createdAt = now.minusSeconds(86400 * 30))
+        val f = PendingQueueFixture(this, listOf(ancient), maxAge = Duration.ZERO)
+        f.feed()
+        assertEquals(listOf("P"), f.drain().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `the cutoff never applies to target language segments`() = runTest {
+        // the segment is older than the cutoff but must stay chain material
+        val segment = translation("T", parent = "P").copy(createdAt = now.minusSeconds(650))
+        val f = PendingQueueFixture(this, listOf(original("P"), segment), maxAge = 10.minutes)
+        f.feed()
+        assertTrue(f.queue.isTranslation("T"))
+        assertEquals(listOf("T", "P"), f.drain().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `an old original stays as the chain context of a young reply without a lookup`() = runTest {
+        val root = original("root").copy(createdAt = now.minusSeconds(900))
+        val reply = original("P", parent = "root")
+        val f = PendingQueueFixture(this, listOf(root, reply), maxAge = 10.minutes)
+        f.feed()
+        // the old root is skipped as work but still seeds the pool, so the
+        // reply's ancestry qualification resolves locally
+        assertEquals(listOf("P"), f.drain().map { it.id })
+        assertTrue(f.lookups.isEmpty())
+    }
+
+    @Test
+    fun `a queued original that ages past the cutoff on re-feed leaves the window and records the cursor`() = runTest {
+        val f = PendingQueueFixture(this, listOf(original()), maxAge = 10.minutes)
+        f.feed()
+        assertTrue(f.queue.hasNext())
+        // the same version observed one minute later is past the cutoff:
+        // rejected at feed, and being the head it records the cursor
+        f.feed(fetchedAt = now.plusSeconds(60))
+        assertFalse(f.queue.hasNext())
+        assertEquals("P", f.queue.cursor())
     }
 
     @Test
@@ -365,5 +445,16 @@ class PendingQueueTest {
         assertTrue(badAccount.message!!.contains("ourAccountId"))
         val badLang = assertFailsWith<IllegalArgumentException> { PendingQueue(owner.id, " ", f.pool) }
         assertTrue(badLang.message!!.contains("targetLangCode"))
+    }
+
+    @Test
+    fun `negative and infinite max ages fail fast while zero and the default are accepted`() = runTest {
+        val f = PendingQueueFixture(this, emptyList())
+        for (bad in listOf((-1).minutes, Duration.INFINITE)) {
+            val error = assertFailsWith<IllegalArgumentException> { PendingQueue(owner.id, "en", f.pool, bad) }
+            assertTrue(error.message!!.contains("maxAge"))
+        }
+        PendingQueue(owner.id, "en", f.pool, Duration.ZERO)
+        assertEquals(1.days, PendingQueue.DEFAULT_MAX_AGE)
     }
 }

@@ -10,6 +10,7 @@ import info.skyblond.fediverse.toot.trans.config.requireValidMaxCompletionTokens
 import info.skyblond.fediverse.toot.trans.config.requireValidReplyChainDepth
 import info.skyblond.fediverse.toot.trans.config.requireValidRetryDelay
 import info.skyblond.fediverse.toot.trans.config.requireValidTransientMaxRetry
+import info.skyblond.fediverse.toot.trans.config.requireValidTranslationMaxAge
 import info.skyblond.fediverse.toot.trans.llm.TranslationRequestFactory
 import info.skyblond.fediverse.toot.trans.llm.Translator
 import info.skyblond.fediverse.toot.trans.llm.client.ChatClient
@@ -132,11 +133,26 @@ fun appModule(
 
     // the boot scan's work window: the account id comes from the resolved
     // [CredentialAccount] (its own definition performs the network IO), the
-    // target language from config; the queue semantics live on
-    // [PendingQueue]
+    // target language and max age from config; the queue semantics and the
+    // cutoff timing both live on [PendingQueue]. The max age is validated
+    // here through the predicate shared with the queue's own constructor
+    // check (see `config/Validation.kt`), so a bad setting fails naming
+    // `translationMaxAge`. The cooldown cross-check rejects the pair that
+    // leaves no eligible age window at all: a toot would be blocked by the
+    // cooldown until the cutoff rejects it, so nothing could ever be
+    // translated.
     single<PendingQueue> {
         val account: CredentialAccount = get()
-        PendingQueue(account.id, config.targetLangCode, get())
+        val maxAge = requireValidTranslationMaxAge("Config `translationMaxAge`", config.translationMaxAge)
+        // validated here too, so the cross-check always compares two
+        // well-formed bounds and its error cannot mask a bad cooldown
+        val cooldown = requireValidCooldown("Config `translationCooldown`", config.translationCooldown)
+        require(cooldown == Duration.ZERO || maxAge == Duration.ZERO || cooldown < maxAge) {
+            "Config `translationMaxAge` ($maxAge) must be greater than " +
+                    "`translationCooldown` ($cooldown) when both are enabled, " +
+                    "otherwise no toot can ever be eligible"
+        }
+        PendingQueue(account.id, config.targetLangCode, get(), maxAge)
     }
 
     // the translation cooldown policy; the config value is validated here

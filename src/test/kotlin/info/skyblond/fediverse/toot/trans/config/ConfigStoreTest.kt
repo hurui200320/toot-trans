@@ -8,6 +8,7 @@ import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.accounts.AccountsClient
 import info.skyblond.fediverse.toot.trans.masto.statuses.Cooldown
+import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
 import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import kotlinx.serialization.json.JsonObject
@@ -19,6 +20,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toKotlinDuration
 
@@ -38,6 +40,7 @@ class ConfigStoreTest {
         targetLanguage: String? = null,
         targetLangCode: String? = null,
         translationCooldown: Duration? = null,
+        translationMaxAge: Duration? = null,
         replyChainDepth: Int? = null,
         llmBaseUrl: String? = null,
         llmApiKey: String? = null,
@@ -63,6 +66,7 @@ class ConfigStoreTest {
         override val targetLanguage: String? = targetLanguage
         override val targetLangCode: String? = targetLangCode
         override val translationCooldown: Duration? = translationCooldown
+        override val translationMaxAge: Duration? = translationMaxAge
         override val replyChainDepth: Int? = replyChainDepth
         override val llmBaseUrl: String? = llmBaseUrl
         override val llmApiKey: String? = llmApiKey
@@ -496,6 +500,28 @@ class ConfigStoreTest {
         ))
         val malformed = assertFailsWith<IllegalArgumentException> { store.translationCooldown }
         assertTrue(malformed.message!!.contains("TRANSLATION_COOLDOWN"))
+    }
+
+    @Test
+    fun `translation max age respects precedence null fallback and built-in default`() {
+        // first non-null wins, so the zero of the middle provider is used
+        val store = ConfigStore(listOf(
+            provider(), provider(translationMaxAge = 0.seconds), provider(translationMaxAge = 1.days),
+        ))
+        assertEquals(0.seconds, store.translationMaxAge)
+        val defaults = ConfigStore(listOf(provider(), DefaultConfigProvider()))
+        assertEquals(PendingQueue.DEFAULT_MAX_AGE, defaults.translationMaxAge)
+    }
+
+    @Test
+    fun `missing and malformed translation max age fail rather than falling through`() {
+        val missing = assertFailsWith<MissingConfigException> { ConfigStore(listOf(provider())).translationMaxAge }
+        assertTrue(missing.message!!.contains("translation max age"))
+        val store = ConfigStore(listOf(
+            EnvConfigProvider(mapOf("TRANSLATION_MAX_AGE" to "soon")::get), DefaultConfigProvider(),
+        ))
+        val malformed = assertFailsWith<IllegalArgumentException> { store.translationMaxAge }
+        assertTrue(malformed.message!!.contains("TRANSLATION_MAX_AGE"))
     }
 
     @Test

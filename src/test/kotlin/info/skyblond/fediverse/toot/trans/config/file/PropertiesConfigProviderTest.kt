@@ -130,6 +130,7 @@ class PropertiesConfigProviderTest {
         assertNull(provider.transientMaxRetry)
         assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
+        assertNull(provider.translationMaxAge)
         assertNull(provider.replyChainDepth)
     }
 
@@ -160,6 +161,25 @@ class PropertiesConfigProviderTest {
         file.writeText("translationCooldown=soon\n")
         val e = assertFailsWith<IllegalArgumentException> { PropertiesConfigProvider(file).translationCooldown }
         assertTrue(e.message!!.contains("translationCooldown"))
+    }
+
+    @Test
+    fun `reads translation max age from properties including zero and blank`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("translationMaxAge=12h\n")
+        assertEquals(12.hours, PropertiesConfigProvider(file).translationMaxAge)
+        file.writeText("translationMaxAge=0s\n")
+        assertEquals(0.seconds, PropertiesConfigProvider(file).translationMaxAge)
+        file.writeText("translationMaxAge=   \n")
+        assertNull(PropertiesConfigProvider(file).translationMaxAge)
+    }
+
+    @Test
+    fun `malformed translation max age names properties key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("translationMaxAge=old\n")
+        val e = assertFailsWith<IllegalArgumentException> { PropertiesConfigProvider(file).translationMaxAge }
+        assertTrue(e.message!!.contains("translationMaxAge"))
     }
 
     @Test

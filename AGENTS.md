@@ -38,14 +38,15 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 - `masto/statuses/StatusesDeleter.kt`: leaf-first deletion of obsolete
   translation segments, 429 backoff, and pool/queue invalidation on success.
 - `masto/statuses/PendingQueue.kt`: the translation work window: entrance
-  eligibility (basic checks plus full reply-chain qualification), the
-  creation-ordered queue, and the rolling cursor.
+  eligibility (basic checks, the max-age cutoff, plus full reply-chain
+  qualification), the creation-ordered queue, the rolling cursor, and the
+  max-age timing contract.
 - `masto/statuses/Cooldown.kt`: the fetched-at cooldown policy (effective
   time `editedAt ?: createdAt`); single-sources the default cooldown.
 - `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
-  chain, instance API transport, statuses pool, pending queue, cooldown,
-  the application coroutine scope, the LLM chat client and the translation
-  stage.
+  chain, instance API transport, statuses pool, pending queue, cooldown and
+  max-age cutoff, the application coroutine scope, the LLM chat client and
+  the translation stage.
 - `di/ProxyFromEnv.kt`: the shared OkHttp client's proxy, resolved from
   the conventional environment variables (`HTTPS_PROXY` and friends).
 - `masto/statuses/TranslationChain.kt`: in-memory reconstruction and

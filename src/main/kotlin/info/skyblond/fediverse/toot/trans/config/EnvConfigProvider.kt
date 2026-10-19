@@ -49,6 +49,9 @@ class EnvConfigProvider(
     override val translationCooldown: Duration?
         get() = duration("TRANSLATION_COOLDOWN")
 
+    override val translationMaxAge: Duration?
+        get() = duration("TRANSLATION_MAX_AGE")
+
     override val replyChainDepth: Int?
         get() = int("REPLY_CHAIN_DEPTH")
 

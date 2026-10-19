@@ -1,9 +1,13 @@
 package info.skyblond.fediverse.toot.trans.masto.statuses
 
+import info.skyblond.fediverse.toot.trans.config.requireValidTranslationMaxAge
 import info.skyblond.fediverse.toot.trans.llm.Footer
 import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.matchFooterFromContent
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.FetchedStatus
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.days
+import kotlin.time.toJavaDuration
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -33,6 +37,21 @@ import java.util.TreeSet
  * context, and an edit cannot reorder the window. The cooldown still reads
  * `editedAt ?: createdAt`.
  *
+ * The max-age cutoff ([maxAge]) bounds the entrance by age: the scan
+ * window is by count (`initialScanSize`), so a big one can reach days
+ * back, and the cutoff keeps that old tail out of the work window. An
+ * original whose version in hand was fetched more than [maxAge] after
+ * its effective time `editedAt ?: createdAt` is skipped by [feed] — an
+ * edit counts as the toot becoming current again. The check reads
+ * [FetchedStatus.fetchedAt] instead of wall clock, so the decision
+ * belongs to the observation in hand, like the cooldown; the boundary
+ * is inclusive, and [Duration.ZERO] disables the cutoff. Rejected
+ * originals are still seeded into the pool, and translated segments are
+ * never subject to the cutoff, so both keep serving as chain context.
+ * [DEFAULT_MAX_AGE] is the built-in default, reused by
+ * `DefaultConfigProvider` so the deploy default cannot drift apart from
+ * the programmatic/test default.
+ *
  * No state is persisted: a restart rebuilds the window from a fresh scan.
  * All operations suspend on one [Mutex], so the queue can be fed and
  * drained from different coroutines.
@@ -41,6 +60,7 @@ class PendingQueue(
     private val ourAccountId: String,
     private val targetLangCode: String,
     private val cachePool: StatusesCachePool,
+    private val maxAge: Duration = DEFAULT_MAX_AGE,
 ) {
     private val toots: TreeSet<FetchedStatus> = TreeSet<FetchedStatus>(
         compareBy<FetchedStatus> { it.status.createdAt }
@@ -61,6 +81,7 @@ class PendingQueue(
     init {
         require(ourAccountId.isNotBlank()) { "ourAccountId must not be blank" }
         require(targetLangCode.isNotBlank()) { "targetLangCode must not be blank" }
+        requireValidTranslationMaxAge("maxAge", maxAge)
     }
 
     /**
@@ -68,12 +89,14 @@ class PendingQueue(
      * feeds, and insert the statuses this deployment works on:
      *
      * - originals (no valid footer, see [Footer]): skip ones already in
-     *   [targetLangCode], ones whose reply chain does not qualify (every
-     *   ancestor must be a reply to us, ending at a root, see
-     *   [checkReplyChain]), and ones blank in both body and content
-     *   warning;
+     *   [targetLangCode], ones already older than [maxAge] at fetch time
+     *   (the class KDoc carries the timing contract), ones whose reply
+     *   chain does not qualify (every ancestor must be a reply to us,
+     *   ending at a root, see [checkReplyChain]), and ones blank in both
+     *   body and content warning;
      * - translated toots (valid footer): keep the [targetLangCode] ones as
-     *   chain material, skip the rest.
+     *   chain material, skip the rest. The max-age cutoff never applies
+     *   here: segments are context, not work.
      *
      * Every fed status is seeded into [cachePool] first, so ancestry reads
      * during qualification resolve locally instead of hitting the API. The
@@ -104,7 +127,7 @@ class PendingQueue(
             val status = fetched.status
             val footer = status.content?.matchFooterFromContent()
 
-            if (isEligible(status, footer)) { // accepted, this is addOrReplace
+            if (isEligible(fetched, footer)) { // accepted, this is addOrReplace
                 mutex.withLock {
                     // delete same id first; unlike [unsafeDrop], this keeps the
                     // cursor: the entry stays pending, so the next scan must
@@ -121,9 +144,11 @@ class PendingQueue(
 
     /**
      * Whether one fed status enters the work window; the checks are
-     * documented on [feed]. The reply-chain walk reads [cachePool].
+     * documented on [feed]. The reply-chain walk reads [cachePool], the
+     * max-age check reads [maxAge].
      * */
-    private suspend fun isEligible(status: Status, footer: Footer?): Boolean {
+    private suspend fun isEligible(fetched: FetchedStatus, footer: Footer?): Boolean {
+        val status = fetched.status
         if (footer != null) { // translated toot
             // not in target lang, skip
             if (status.language != targetLangCode) return false
@@ -132,6 +157,9 @@ class PendingQueue(
             if (status.language == targetLangCode) return false
             // is reply but not to ourselves, skip
             if (status.inReplyToId != null && status.inReplyToAccountId != ourAccountId) return false
+            // already older than the cutoff when fetched, skip; the
+            // class KDoc carries the timing contract
+            if (!checkMaxAge(fetched)) return false
             // body and content warning is all blank, skip
             val body = Jsoup.parseBodyFragment(status.content.orEmpty()).body().text()
             if (body.isBlank() && status.spoilerText.isNullOrBlank()) return false
@@ -141,6 +169,17 @@ class PendingQueue(
         }
         // accepted
         return true
+    }
+
+    /**
+     * Whether [fetched] is young enough for the max-age cutoff; the class
+     * KDoc documents the timing contract.
+     * */
+    private fun checkMaxAge(fetched: FetchedStatus): Boolean {
+        // zero disables the cutoff, like the other policy durations
+        if (maxAge == Duration.ZERO) return true
+        val effectiveTime = fetched.status.editedAt ?: fetched.status.createdAt
+        return java.time.Duration.between(effectiveTime, fetched.fetchedAt) <= maxAge.toJavaDuration()
     }
 
     private fun unsafeDrop(statusId: String) {
@@ -263,5 +302,17 @@ class PendingQueue(
             // find next parent loop
             current = cachePool.getStatus(parentId)?.status ?: return false
         }
+    }
+
+    companion object {
+        /**
+         * Built-in max age: one day, enough to catch up a normal gap
+         * while keeping a fresh boot from replying to toots from days
+         * ago. Single source of truth, same pattern as [Cooldown]'s
+         * companion object: the config package's default provider reuses
+         * it, so the deploy default cannot drift apart from the
+         * programmatic/test default.
+         * */
+        val DEFAULT_MAX_AGE: Duration = 1.days
     }
 }

@@ -149,6 +149,7 @@ built).
 | Transient max retry | `TRANSIENT_MAX_RETRY` | `transientMaxRetry` | No, default `10` | `5` |
 | Transient retry delay | `TRANSIENT_RETRY_DELAY` | `transientRetryDelay` | No, default `10s` | `30s` |
 | Translation cooldown | `TRANSLATION_COOLDOWN` | `translationCooldown` | No, default `3m`; `0s` disables | `1m` |
+| Translation max age | `TRANSLATION_MAX_AGE` | `translationMaxAge` | No, default `1d`; `0s` disables | `12h` |
 | Reply chain depth | `REPLY_CHAIN_DEPTH` | `replyChainDepth` | No, default `3`; `0` disables context | `5` |
 | Target language | `TARGET_LANGUAGE` | `targetLanguage` | Yes | `English` |
 | Target lang code | `TARGET_LANG_CODE` | `targetLangCode` | Yes | `en` |
@@ -219,7 +220,8 @@ Duration values accept units like `500ms`, `1s`, `2m`, `24h`, as well as
 ISO-8601 durations like `PT24H`. An empty value is treated as unset; a
 malformed or out-of-range value fails with an error naming the setting
 (durations must be at least `1ms`, except `backoffResetMargin` which allows
-`0s`, `translationCooldown` which is finite and non-negative, and the `llm*`
+`0s`, `translationCooldown` and `translationMaxAge` which are finite and
+non-negative, and the `llm*`
 timeouts which are finite and non-negative, where `0` disables the timeout;
 `poolMaxCacheEntries` and `llmMaxCompletionTokens` must be positive;
 `initialScanSize`, `transientMaxRetry`
@@ -227,14 +229,24 @@ and `replyChainDepth` must be non-negative, where `0` disables the boot-up
 scan, transient retries and the LLM context respectively).
 
 The eligibility policy — the footered-reply/language/blank-body checks,
-the full reply-chain qualification, and the creation-time ordering — is
-documented on `PendingQueue.feed` in
+the max-age cutoff, the full reply-chain qualification, and the
+creation-time ordering — is documented on `PendingQueue.feed`, and the
+max-age timing (same effective time, same fetch-time check) on the
+`PendingQueue` class KDoc, both in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/PendingQueue.kt`;
 the cooldown timing (`editedAt ?: createdAt`, checked against the fetch
 time) on `Cooldown` in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/Cooldown.kt`.
-`initialScanSize` limits the number of recent posts, not their age; there is
-no separate time cutoff. `replyChainDepth` bounds how many ancestors feed the
+`initialScanSize` limits the number of recent posts, `translationMaxAge` the
+age of what gets translated: toots already older than the cutoff when
+fetched are skipped, while the scan window stays as large as configured
+(the skipped toots still feed the chain context of younger ones, and
+translated segments are never subject to the cutoff, so a younger reply to
+an old toot keeps its history). A fresh boot or a catch-up after downtime
+therefore cannot suddenly translate and reply to toots from days ago; on
+the other hand, downtime longer than the cutoff leaves those toots
+untranslated, so raise the setting to widen the catch-up window.
+`replyChainDepth` bounds how many ancestors feed the
 LLM context; the context rules (pool reads, source fetches, translated-ancestor
 turns, media) live on `ReplyChainContext` in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/ReplyChainContext.kt`.
@@ -256,6 +268,7 @@ targetLangCode=en
 # llmReasoningEffort=medium
 # llmReqExtra={}
 # replyChainDepth=3
+# translationMaxAge=1d
 ```
 
 ### Proxy

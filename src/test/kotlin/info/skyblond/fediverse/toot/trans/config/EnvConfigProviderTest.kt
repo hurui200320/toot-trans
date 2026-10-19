@@ -69,6 +69,7 @@ class EnvConfigProviderTest {
         assertNull(provider.transientMaxRetry)
         assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
+        assertNull(provider.translationMaxAge)
         assertNull(provider.replyChainDepth)
         assertNull(provider.targetLanguage)
         assertNull(provider.targetLangCode)
@@ -102,6 +103,21 @@ class EnvConfigProviderTest {
             EnvConfigProvider(mapOf("TRANSLATION_COOLDOWN" to "soon")::get).translationCooldown
         }
         assertTrue(e.message!!.contains("TRANSLATION_COOLDOWN"))
+    }
+
+    @Test
+    fun `reads translation max age including zero from the environment`() {
+        assertEquals(12.hours, EnvConfigProvider(mapOf("TRANSLATION_MAX_AGE" to "12h")::get).translationMaxAge)
+        assertEquals(0.seconds, EnvConfigProvider(mapOf("TRANSLATION_MAX_AGE" to "0s")::get).translationMaxAge)
+    }
+
+    @Test
+    fun `blank translation max age is unset and malformed names variable`() {
+        assertNull(EnvConfigProvider(mapOf("TRANSLATION_MAX_AGE" to " ")::get).translationMaxAge)
+        val e = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("TRANSLATION_MAX_AGE" to "old")::get).translationMaxAge
+        }
+        assertTrue(e.message!!.contains("TRANSLATION_MAX_AGE"))
     }
 
     @Test

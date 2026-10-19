@@ -84,7 +84,10 @@ class StatusesDeleterTest {
             timeSource = scope.testScheduler.timeSource,
         )
 
-        fun queue(pool: StatusesCachePool) = PendingQueue(owner.id, "en", pool)
+        // the max-age cutoff is unrelated to deletion, and the fixed
+        // createdAt of the test statuses is older than the built-in cutoff:
+        // disabled here so the queue holds them regardless
+        fun queue(pool: StatusesCachePool) = PendingQueue(owner.id, "en", pool, Duration.ZERO)
 
         fun deleter(
             pool: StatusesCachePool,

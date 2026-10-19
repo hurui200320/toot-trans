@@ -78,11 +78,6 @@ interface ConfigProvider {
      * */
     val transientRetryDelay: Duration?
 
-    // TODO: add a cutoff for old toots.
-    //       still big initial scan, but don't post translations
-    //       for really old toots, so user won't suddenly see a
-    //       translation for toots days ago
-
     /**
      * Delay after creation/edit before a toot is eligible; zero disables it.
      * The cooldown timing contract lives on `Cooldown` in
@@ -90,6 +85,19 @@ interface ConfigProvider {
      * `PendingQueue.feed` in `masto/statuses/PendingQueue.kt`.
      */
     val translationCooldown: Duration?
+
+    /**
+     * Maximum age of a toot at fetch time for it to be eligible for
+     * translation: toots that are already older when fetched are
+     * skipped, so a big boot-up scan or a catch-up after downtime
+     * cannot suddenly translate and reply to toots from days ago. The
+     * age is measured as `editedAt ?: createdAt`, so an edit counts as
+     * the toot becoming current again, and zero disables the cutoff.
+     * The cutoff timing contract lives on `PendingQueue` (its class
+     * KDoc) and the entrance eligibility on `PendingQueue.feed`, both in
+     * `masto/statuses/PendingQueue.kt`.
+     */
+    val translationMaxAge: Duration?
 
     /**
      * How many ancestors above the toot under translation feed the LLM
