@@ -42,15 +42,24 @@ The drain, per eligible toot:
    text via `/statuses/:id/source`, each translated ancestor as a user/assistant
    turn (`<missing translation>` for an ancestor without a complete chain,
    `<empty content>` for a toot with neither body nor warning), and the toot's
-   own images (bounded, failures skipped) for the vision input.
-3. Translate (`llm/Translator.kt`): the request ladder is full (history +
-   context + images) → text-only → minimal, downgrading on a payload-shaped 4xx;
-   the answer is one JSON object `{"translation": ..., "spoiler_text": ...}`
-   (`llm/TranslationOutput.kt`), constrained by a strict JSON schema sent as
-   `response_format` on every request — structured outputs are a requirement, so
-   a provider or model without them cannot be used — with the original
-   content warning kept when the model omits it and a content-warning-only toot
-   mirrored as a body-less translation carrying the translated warning.
+   own images (bounded, failures skipped) for the vision input. A toot turn is a
+   JSON object with a `content` and a `spoiler_text` field, either null when the
+   toot does not have that part.
+3. Translate (`llm/Translator.kt`): the request fallback sequence is full
+   (history + context + images) → text-only → minimal; a payload-shaped 4xx
+   downgrades to the next variant, while an unusable answer (unparsable,
+   against the source shape, or without usable text) is retried three times
+   on the same variant first — a flaky answer thus never shrinks the request —
+   and only then downgrades. A content-filtered answer is the exception: the
+   provider refuses that payload deterministically, so it downgrades right
+   away. The answer is one JSON
+   object `{"content": ..., "spoiler_text": ...}` (`llm/TranslationOutput.kt`),
+   constrained by a strict JSON schema sent as `response_format` on every
+   request — structured outputs are a requirement, so a provider or model
+   without them cannot be used — with a null field mirroring a field the toot
+   does not have: a content-warning-only toot answers a null content, and an
+   answer that still drops a field the source has, at the end of the whole
+   fallback sequence, fails that toot.
 
 The finished translation is logged, not posted: one block per toot, framed by
 markers, carrying the source, both content warnings and the answer (see
@@ -58,10 +67,11 @@ markers, carrying the source, both content warnings and the answer (see
 without touching the instance. Posting the translation as a reply chain is the
 next milestone.
 
-Failure policy (see `TranslationProcessor`): toot-specific failures — an
-unparseable answer, a permanently rejected payload after the ladder, a chain
-status deleted outside the application (a source read answering 404) — drop the
-toot with a loud log so the queue keeps moving; rate limits, server errors and
+Failure policy (see `TranslationProcessor`): toot-specific failures — an answer
+that stays unusable through the translator's retries and variant downgrades,
+a permanently rejected payload after the fallback sequence, a chain status
+deleted outside the application (a source read answering 404) — drop the toot
+with a loud log so the queue keeps moving; rate limits, server errors and
 transport errors stop the drain and leave everything queued for the next run.
 Credential/configuration failures (an LLM 4xx outside the payload set)
 propagate, because no following toot could succeed either.
@@ -90,8 +100,9 @@ The queue only decides what enters the work window; see
 - Segments made unreachable by a parent deleted outside this application
   are not discovered and stay on the instance; clean up manually.
 - A permanently rejected toot (content filter, a model without the needed
-  capabilities even after the ladder) is skipped for that run and retried on
-  the next one; a provider that rejects everything keeps producing loud logs.
+  capabilities even after the fallback sequence) is skipped for that run and
+  retried on the next one; a provider that rejects everything keeps producing
+  loud logs.
 
 ## Access Token
 
@@ -180,10 +191,11 @@ wrapper derives its attempt budget and fixed delay from them, see
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`; the previous
 `scanTransient*` names are gone. For the LLM client this means one completion
 can spend up to `transientMaxRetry + 1` attempts (the initial attempt plus
-that many retries), each attempt itself bounded by `llmReadTimeout`, and the
-request ladder can multiply that by its three rungs (full/text/minimal) — so
-the budget multiplies the worst-case time a single translation can wait before
-the next run sees its failure.
+that many retries), each attempt itself bounded by `llmReadTimeout`; the
+request walk can multiply that by its three variants (full/text/minimal) and by
+four answer attempts per variant (the initial completion plus three retries
+on an unusable answer) — so the budget multiplies the worst-case time a single
+translation can wait before the next run sees its failure.
 The `target*` pair picks the translation output: `targetLanguage` is the
 plain-text language name (e.g. `English`, `Simplified Chinese`), and
 `targetLangCode` is the language tag (e.g. `en`, `zh-CN`) used to tag the
@@ -379,13 +391,21 @@ The client is wired into the application container: `ChatClient` resolves to
 or invalid LLM transport config fails boot.
 
 The translation stage on top of the client is `llm/Translator.kt`: it tries the
-request ladder (full with images → text-only → minimal) and downgrades on each
-payload-shaped 4xx (400, 413, 415, 422) before giving up. The prompt contract —
-one JSON object `{"translation": ..., "spoiler_text": ...}`, user turns shaped
-like `{"text": ..., "spoiler_text": ...}`, the `<missing translation>` and
-`<empty content>` placeholders and the preservation rules — lives on
-`llm/TranslationRequestFactory.kt`, together with the strict JSON schema sent
-as `response_format` on every request:
+request fallback sequence (full with images → text-only → minimal) and
+downgrades on each payload-shaped 4xx (400, 413, 415, 422) before giving up.
+An *answer-shaped* failure — an unparsable answer, one that breaks the source
+shape, or a completion without usable text — is not a payload problem: the same
+variant is attempted up to four times (the initial call plus three retries)
+before the walk downgrades, and only once the whole fallback sequence is
+exhausted does the processor see the failure and drop the toot. A
+content-filtered answer is deterministic for the same payload: it downgrades
+right away instead of spending the remaining attempts. The
+prompt contract —
+one JSON object `{"content": ..., "spoiler_text": ...}` with each field null for
+a part the toot does not have, toot turns shaped the same way, the
+`<missing translation>` and `<empty content>` placeholders and the preservation
+rules — lives on `llm/TranslationRequestFactory.kt`, together with the strict
+JSON schema sent as `response_format` on every request:
 the answer is constrained at the wire level, not only by the prompt. Structured
 outputs are required with no fallback (see the `llm*` notes in
 [Configuration](#configuration)): a provider or model that cannot enforce the

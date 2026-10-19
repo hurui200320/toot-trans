@@ -301,9 +301,10 @@ class ChatApiException(
          * problems, for which a smaller payload cannot succeed.
          *
          * Single source of truth for the two consumers of the
-         * distinction: `Translator`'s ladder downgrades the request
-         * variant on these codes, while a rejection surviving the whole
-         * ladder is permanent for that toot in `TranslationProcessor`.
+         * distinction: `Translator`'s fallback sequence downgrades the
+         * request variant on these codes, while a rejection surviving
+         * the whole sequence is permanent for that toot in
+         * `TranslationProcessor`.
          * The two policies must not drift apart.
          * */
         val PAYLOAD_REJECTION_HTTP_CODES = setOf(400, 413, 415, 422)

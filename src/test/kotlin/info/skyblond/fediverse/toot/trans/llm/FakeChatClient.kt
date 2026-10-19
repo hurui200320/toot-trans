@@ -14,7 +14,7 @@ import kotlinx.serialization.json.put
 /**
  * [ChatClient] fake for the translation-stage tests: records every
  * request and answers through the swappable [complete] handler, so a
- * test can script a ladder of successes and failures. The default
+ * test can script a sequence of successes and failures. The default
  * handler fails the test instead of silently answering (same pattern
  * as the status fixtures' error stubs).
  * */
@@ -56,10 +56,11 @@ internal fun completionResponse(
 
 /**
  * A JSON answer following `TranslationRequestFactory`'s output
- * contract, for scripting [FakeChatClient].
+ * contract, for scripting [FakeChatClient]: one `content` and one
+ * `spoiler_text` field, null rendered as a literal null.
  * */
-internal fun translationAnswer(translation: String, spoilerText: String? = null): String =
+internal fun translationAnswer(content: String?, spoilerText: String? = null): String =
     buildJsonObject {
-        put("translation", translation)
+        put("content", content?.let(::JsonPrimitive) ?: JsonNull)
         put("spoiler_text", spoilerText?.let(::JsonPrimitive) ?: JsonNull)
     }.toString()

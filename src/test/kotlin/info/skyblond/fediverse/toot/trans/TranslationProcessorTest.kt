@@ -200,10 +200,11 @@ class TranslationProcessorTest {
 
             f.processor.processQueue()
 
-            // the obsolete segments are gone and the toot is dropped:
+            // the obsolete segments are gone and the toot is dropped
+            // after the answer retries and both variants are exhausted:
             // the next run re-feeds it and retranslates from scratch
             assertEquals(listOf("T2", "T1"), f.clientFake.deleteRequests)
-            assertEquals(1, f.chat.requests.size)
+            assertEquals(8, f.chat.requests.size)
             assertFalse(f.queue.hasNext())
             assertEquals("P", f.queue.cursor())
         }
@@ -226,7 +227,7 @@ class TranslationProcessorTest {
 
             assertFalse(f.queue.hasNext())
             assertEquals("Q", f.queue.cursor())
-            // P was dropped after the ladder was rejected and has no
+            // P was dropped after the fallback sequence was rejected and has no
             // answer; the drain moved on and Q's request is the last one
             assertEquals(3, f.chat.requests.size)
             assertTrue(targetText(f.chat.requests.last()).contains("body Q"))
@@ -242,8 +243,26 @@ class TranslationProcessorTest {
 
             f.processor.processQueue()
 
-            assertEquals(1, f.chat.requests.size)
+            // the retries and both variants are exhausted before the drop
+            assertEquals(8, f.chat.requests.size)
             assertFalse(f.queue.hasNext())
+        }
+    }
+
+    @Test
+    fun `an answer that drops the source body drops the toot`() {
+        runTest {
+            val f = Fixture(this, listOf(original("P")))
+            f.feed()
+            f.chat.answerWith(translationAnswer(null))
+
+            f.processor.processQueue()
+
+            // the shape policy fails on every attempt of both variants,
+            // and the processor drops the toot after that
+            assertEquals(8, f.chat.requests.size)
+            assertFalse(f.queue.hasNext())
+            assertEquals("P", f.queue.cursor())
         }
     }
 
@@ -349,7 +368,7 @@ class TranslationProcessorTest {
             val cRequest = f.chat.requests.single()
             assertEquals(4, cRequest.messages.size)
             val assistant = Json.parseToJsonElement(messageJson(cRequest, 2)).jsonObject
-            assertEquals("Translated", assistant["translation"]?.jsonPrimitive?.content)
+            assertEquals("Translated", assistant["content"]?.jsonPrimitive?.content)
             assertFalse(messageJson(cRequest, 2).contains(MISSING_TRANSLATION_PLACEHOLDER))
         }
     }

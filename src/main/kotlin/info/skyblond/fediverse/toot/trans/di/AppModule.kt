@@ -194,7 +194,7 @@ fun appModule(
         )
     }
 
-    // walks the request ladder over the retrying chat client
+    // walks the request fallback sequence over the retrying chat client
     single<Translator> {
         Translator(get(), get())
     }

@@ -2,26 +2,30 @@ package info.skyblond.fediverse.toot.trans.llm
 
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * The parsed answer of one translation completion: the toot body and
- * the translated content warning (null when the original had none).
- * Produced by [parseTranslationOutput] and adjusted by `Translator`'s
- * answer policy, which mirrors a body-less source to a blank
- * [translation] (see that class).
+ * The parsed answer of one translation completion: the translated toot
+ * body and the translated content warning. Produced by
+ * [parseTranslationOutput], where a null field means the answer left
+ * that part absent or blank, and then shaped against the source by
+ * `Translator`'s answer policy, where a null field means the toot does
+ * not have that part (see that class).
  * */
 data class TranslatedToot(
-    val translation: String,
+    val content: String?,
     val spoilerText: String?,
 )
 
 /**
  * A completion answer that cannot serve as a translation: not a JSON
- * object, or missing a non-blank `translation` field. The processor
- * treats it as a permanent failure of that toot, see
- * `TranslationProcessor`.
+ * object, or an answer field that is neither a string nor null. The
+ * processor treats it as a permanent failure of that toot (after
+ * `Translator`'s answer retries and variant downgrades), see
+ * `TranslationProcessor`. `Translator` raises the same exception for
+ * an answer that drops a field the source toot has.
  * */
 class TranslationOutputException(message: String) : RuntimeException(message)
 
@@ -29,17 +33,21 @@ private val json = Json { ignoreUnknownKeys = true }
 
 /**
  * Parse the answer contract of [TranslationRequestFactory]'s system
- * prompt: exactly one JSON object
- * `{"translation": "...", "spoiler_text": "..." | null}`.
+ * prompt: one JSON object
+ * `{"content": "..." | null, "spoiler_text": "..." | null}`.
  *
  * Tolerant where providers commonly stray (a markdown code fence
- * wrapper, extra keys, blank strings for absent values) and strict
- * where it matters: any other shape, or a blank `translation`, fails
- * fast with [TranslationOutputException] and a truncated raw snippet.
+ * wrapper, extra keys, missing or blank fields for absent values) and
+ * strict where it matters: any other shape, or a field of any type but
+ * string and null, fails fast with [TranslationOutputException] and a
+ * truncated raw snippet. An all-null answer parses as the contract's
+ * "nothing to translate" answer; whether it matches the toot under
+ * translation is the caller's call.
  *
- * The CW fallback policy (e.g. reusing the original content warning
- * when the answer omitted it) lives in `Translator`, which knows the
- * source; this function only parses.
+ * The source-shape policy (a field the source toot does not have is
+ * nulled out, and an answer that drops a field the source has is
+ * rejected) lives in `Translator`, which knows the source; this
+ * function only parses.
  * */
 fun parseTranslationOutput(text: String): TranslatedToot {
     val stripped = stripCodeFence(text)
@@ -55,24 +63,28 @@ fun parseTranslationOutput(text: String): TranslatedToot {
             "Translation answer is not a JSON object: ${stripped.take(SNIPPET_LENGTH)}"
         )
 
-    // JsonNull is a JsonPrimitive too, so filter with isString:
-    // a literal null counts as "no value", not as the text "null"
-    val translation = (obj["translation"] as? JsonPrimitive)
-        ?.takeIf { it.isString }
-        ?.content
-        ?.trim()
-    if (translation.isNullOrBlank()) {
-        throw TranslationOutputException(
-            "Translation answer has no non-blank \"translation\" field: ${stripped.take(SNIPPET_LENGTH)}"
-        )
-    }
-    val spoilerText = (obj["spoiler_text"] as? JsonPrimitive)
-        ?.takeIf { it.isString }
-        ?.content
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
+    val content = obj.optionalString("content", stripped)
+    val spoilerText = obj.optionalString("spoiler_text", stripped)
+    return TranslatedToot(content, spoilerText)
+}
 
-    return TranslatedToot(translation, spoilerText)
+/**
+ * One contract field of an answer object: a string (trimmed, blank
+ * counts as absent), a literal null, or a missing key; anything else
+ * fails fast.
+ * */
+private fun JsonObject.optionalString(key: String, raw: String): String? {
+    val value = this[key] ?: return null
+    if (value is JsonNull) return null
+    // after the null check above, the only primitives left are
+    // literals: isString rejects the non-string ones (numbers,
+    // booleans) so they fail fast below
+    val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
+        ?.trim()
+        ?: throw TranslationOutputException(
+            "Translation answer field \"$key\" is not a string or null: ${raw.take(SNIPPET_LENGTH)}"
+        )
+    return text.takeIf { it.isNotBlank() }
 }
 
 /**
@@ -93,4 +105,4 @@ private fun stripCodeFence(raw: String): String {
  * Upper bound of the raw answer snippet in [TranslationOutputException]
  * messages, so a pathological answer cannot bloat the log line.
  * */
-private const val SNIPPET_LENGTH = 200
+internal const val SNIPPET_LENGTH = 200

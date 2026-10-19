@@ -81,9 +81,10 @@ data class TranslationContextEntry(
 const val MISSING_TRANSLATION_PLACEHOLDER = "<missing translation>"
 
 /**
- * User-turn text of a toot with neither body nor content warning (e.g.
- * a media-only ancestor), so the model can tell an empty toot from a
- * message whose content got lost; [TranslationRequestFactory] renders
- * it instead of an empty `"text"` field.
+ * `"content"` value of a toot with neither body nor content warning
+ * (e.g. a media-only ancestor), so the model can tell an empty toot
+ * from a message whose content got lost: [TranslationRequestFactory]
+ * renders it instead of a null `"content"` field, and the answer
+ * contract expects null answers for it.
  * */
 const val EMPTY_CONTENT_PLACEHOLDER = "<empty content>"

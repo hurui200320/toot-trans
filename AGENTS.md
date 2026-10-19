@@ -70,9 +70,10 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
   matching and stripping.
 - `llm/TranslationRequestFactory.kt`: the prompt contract (JSON answer shape,
   history pairing, context blocks), the always-sent strict `response_format`
-  schema and the three request variants of the ladder.
-- `llm/Translator.kt`: the request ladder over `ChatClient` plus the
-  answer's spoiler policy.
+  schema and the three request variants.
+- `llm/Translator.kt`: the request fallback sequence over `ChatClient` —
+  payload-shaped downgrades and answer retries (a content-filtered answer
+  skips the retries) — plus the answer's source-shape policy.
 - `llm/TranslationOutput.kt`: parsing of the JSON answer contract.
 - `llm/TranslationContext.kt`: the prompt input types and the
   `<missing translation>` / `<empty content>` placeholders.

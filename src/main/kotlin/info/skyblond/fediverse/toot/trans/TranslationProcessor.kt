@@ -35,10 +35,10 @@ import kotlinx.serialization.SerializationException
  * Failure policy (see also [Translator]):
  * - toot-specific failures — the answer cannot be parsed, the
  *   completion is unusable, the provider permanently rejects the
- *   payload after the request ladder, a chain status is gone from the
- *   instance (a source read answering 404, e.g. deleted between the
- *   scan and the drain) — drop the entry with a loud log, so the queue
- *   keeps moving;
+ *   payload after the request fallback sequence, a chain status is
+ *   gone from the instance (a source read answering 404, e.g. deleted
+ *   between the scan and the drain) — drop the entry with a loud log,
+ *   so the queue keeps moving;
  * - credential/configuration failures (an LLM 4xx outside the payload
  *   set, e.g. a bad key or unknown model) propagate: every following
  *   toot would fail the same way;
@@ -155,10 +155,11 @@ class TranslationProcessor(
             |===== translation of ${toot.id} (reason=$reason) =====
             |source spoiler_text: ${context.target.source.spoilerText.ifBlank { "<none>" }}
             |source:
-            |${context.target.source.text}
+            |${context.target.source.text.ifBlank { "<none>" }}
+            |------------------------------------------------------
             |translation spoiler_text: ${translated.spoilerText ?: "<none>"}
             |translation:
-            |${translated.translation}
+            |${translated.content ?: "<none>"}
             |===== end of translation of ${toot.id} =====
             """.trimMargin()
         }

@@ -467,27 +467,34 @@ data class Usage(
  * @throws ChatCompletionException when the response carries no usable text: no
  *   choice, no content or text parts, or only blank text (e.g. a tool-call-only or
  *   filtered response, or a thinking model that burned its entire budget into its
- *   unmodeled reasoning field and answered with an empty string — check
- *   [ChatChoice.finishReason] for `length` yourself; a non-blank truncated answer
- *   still returns its partial text).
+ *   unmodeled reasoning field and answered with an empty string). The exception
+ *   carries the choice's [ChatCompletionException.finishReason], so callers can
+ *   tell a provider-side refusal from a malformed response (see
+ *   [isContentFiltered]); a non-blank truncated answer (`finish_reason` `length`)
+ *   still returns its partial text.
  * */
 fun ChatCompletionResponse.firstChoiceText(): String {
     val choice = choices.firstOrNull()
         ?: throw ChatCompletionException("Response has no choices (id=$id)")
     val content = choice.message.content
-        ?: throw ChatCompletionException("First choice has no content (finishReason=${choice.finishReason})")
+        ?: throw ChatCompletionException(
+            "First choice has no content (finishReason=${choice.finishReason})",
+            choice.finishReason,
+        )
     val text = when (content) {
         is ChatContent.Text -> content.text
         is ChatContent.Parts -> {
             val texts = content.parts.filterIsInstance<ContentPart.TextPart>()
             if (texts.isEmpty()) throw ChatCompletionException(
-                "First choice content has no text parts (finishReason=${choice.finishReason})"
+                "First choice content has no text parts (finishReason=${choice.finishReason})",
+                choice.finishReason,
             )
             texts.joinToString("\n") { it.text }
         }
     }
     if (text.isBlank()) throw ChatCompletionException(
-        "First choice text is blank (finishReason=${choice.finishReason})"
+        "First choice text is blank (finishReason=${choice.finishReason})",
+        choice.finishReason,
     )
     return text
 }
@@ -495,5 +502,21 @@ fun ChatCompletionResponse.firstChoiceText(): String {
 /**
  * A 2xx response that cannot serve as an answer: no choices, or a first choice
  * without usable (non-blank) text content, see [firstChoiceText].
+ *
+ * [finishReason] is the first choice's `finish_reason` when a choice existed to
+ * read ([ChatChoice.finishReason]); null when the response carried none. See
+ * [isContentFiltered].
  * */
-class ChatCompletionException(message: String) : RuntimeException(message)
+class ChatCompletionException(
+    message: String,
+    val finishReason: String? = null,
+) : RuntimeException(message)
+
+/**
+ * Whether the provider's content filter refused the answer rather than the model
+ * failing: the first choice finished with `content_filter` and carried no usable
+ * text (see [firstChoiceText]). The refusal is deterministic for the same
+ * payload, so consumers that retry unusable answers downgrade instead of
+ * re-sending (see `Translator`).
+ * */
+fun ChatCompletionException.isContentFiltered(): Boolean = finishReason == "content_filter"

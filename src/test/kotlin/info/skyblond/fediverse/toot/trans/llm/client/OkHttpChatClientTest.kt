@@ -20,6 +20,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import java.util.Base64
 
@@ -249,6 +250,8 @@ class OkHttpChatClientTest : ChatClientTestBase() {
 
         val e = assertFailsWith<ChatCompletionException> { response.firstChoiceText() }
         assertEquals("First choice content has no text parts (finishReason=content_filter)", e.message)
+        assertEquals("content_filter", e.finishReason)
+        assertTrue(e.isContentFiltered())
     }
 
     @Test
@@ -259,6 +262,8 @@ class OkHttpChatClientTest : ChatClientTestBase() {
 
         val e = assertFailsWith<ChatCompletionException> { response.firstChoiceText() }
         assertEquals("Response has no choices (id=chatcmpl-empty)", e.message)
+        assertNull(e.finishReason)
+        assertFalse(e.isContentFiltered())
     }
 
     @Test
@@ -273,6 +278,7 @@ class OkHttpChatClientTest : ChatClientTestBase() {
 
         val e = assertFailsWith<ChatCompletionException> { response.firstChoiceText() }
         assertEquals("First choice has no content (finishReason=length)", e.message)
+        assertEquals("length", e.finishReason)
     }
 
     @Test
@@ -289,6 +295,7 @@ class OkHttpChatClientTest : ChatClientTestBase() {
 
         val e = assertFailsWith<ChatCompletionException> { response.firstChoiceText() }
         assertEquals("First choice text is blank (finishReason=length)", e.message)
+        assertEquals("length", e.finishReason)
     }
 
     @Test
@@ -316,6 +323,7 @@ class OkHttpChatClientTest : ChatClientTestBase() {
 
         val e = assertFailsWith<ChatCompletionException> { response.firstChoiceText() }
         assertEquals("First choice text is blank (finishReason=stop)", e.message)
+        assertEquals("stop", e.finishReason)
     }
 
     @Test
