@@ -129,6 +129,8 @@ class TranslationRequestFactory(
         |- Preserve @mentions, #hashtags, :emoji_shortcodes: and URLs exactly as they appear.
         |- Keep the original line breaks and paragraph structure in "content".
         |- Translate the content warning in "spoiler_text" as faithfully as the body.
+        |- Generate a concise translation: mastodon has 500 char limits on toots, your output will be automatically paged
+        |  and turns into a chain of replies. But a long chain doesn't provide a good read experience.
     """.trimMargin()
 
     /**

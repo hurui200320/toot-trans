@@ -14,15 +14,18 @@ import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
 import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationChainState
+import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationPoster
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerializationException
 
 /**
  * Drains [PendingQueue]: for every eligible original, delete obsolete
- * segments, build the LLM context, translate, log the result and drop
- * the entry; the translation segments themselves are chain material and
- * are simply dropped when they reach the head.
+ * segments, build the LLM context, translate, log the result for
+ * review, post the translation as the original's reply chain
+ * ([TranslationPoster]) and drop the entry; the translation segments
+ * themselves are chain material and are simply dropped when they reach
+ * the head.
  *
  * The queue is ordered by creation time, so ancestors are always
  * translated before their replies; a toot still inside [Cooldown]
@@ -32,18 +35,24 @@ import kotlinx.serialization.SerializationException
  * process start (the window is rebuilt in memory, there is no state on
  * disk).
  *
- * Failure policy (see also [Translator]):
+ * Failure policy (see also [Translator] and [TranslationPoster]):
  * - toot-specific failures — the answer cannot be parsed, the
  *   completion is unusable, the provider permanently rejects the
- *   payload after the request fallback sequence, a chain status is
- *   gone from the instance (a source read answering 404, e.g. deleted
- *   between the scan and the drain) — drop the entry with a loud log,
- *   so the queue keeps moving;
+ *   payload after the request fallback sequence, the instance
+ *   permanently rejects the reply payload (HTTP 400/422, e.g. a
+ *   custom character limit below the segment budget), or a chain
+ *   status is gone from the instance (a source read answering 404,
+ *   e.g. deleted between the scan and the drain) — drop the entry
+ *   with a loud log, so the queue keeps moving;
  * - credential/configuration failures (an LLM 4xx outside the payload
- *   set, e.g. a bad key or unknown model) propagate: every following
- *   toot would fail the same way;
+ *   set, e.g. a bad key or unknown model, or an instance 401/403, e.g.
+ *   a revoked token or one without `write:statuses`) propagate: every
+ *   following toot would fail the same way;
  * - everything else (rate limits, server errors, transport errors)
- *   stops the drain and leaves the entry queued for the next run.
+ *   stops the drain and leaves the entry queued for the next run. A
+ *   posting failure leaves the already-posted prefix in place; the
+ *   next run's chain classification reports the partial chain as
+ *   invalid and deletes it leaf-first before retranslating.
  * */
 class TranslationProcessor(
     private val queue: PendingQueue,
@@ -51,6 +60,7 @@ class TranslationProcessor(
     private val deleter: StatusesDeleter,
     private val contextBuilder: ReplyChainContext,
     private val translator: Translator,
+    private val poster: TranslationPoster,
 ) {
     /**
      * Process the window until it is empty, the head is blocked, or a
@@ -92,6 +102,13 @@ class TranslationProcessor(
                         throw e
                     }
 
+                    e is MastoApiException && e.httpCode in CREDENTIAL_HTTP_CODES -> {
+                        // the instance-side twin: our token is invalid
+                        // or lacks the needed scope, so every following
+                        // toot would fail identically
+                        throw e
+                    }
+
                     else -> {
                         logger.warn(e) {
                             "Stopping the drain at toot ${toot.id}; it stays queued for the next run"
@@ -110,8 +127,8 @@ class TranslationProcessor(
 
     /**
      * Translate one eligible original: delete obsolete segments
-     * leaf-first, then context -> translate -> log -> drop. Failures
-     * propagate to [processQueue]'s policy.
+     * leaf-first, then context -> translate -> log -> post -> drop.
+     * Failures propagate to [processQueue]'s policy.
      * */
     private suspend fun processOne(toot: Status) {
         when (val state = queue.findTranslationChainState(toot)) {
@@ -132,17 +149,20 @@ class TranslationProcessor(
                 val context = contextBuilder.build(toot)
                 val translated = translator.translate(context)
                 logTranslation(toot, state.reason, context, translated)
+                val posted = poster.post(toot, translated)
+                logger.info { "Posted ${posted.size} translation segment(s) for toot ${toot.id}" }
                 queue.drop(toot.id)
             }
         }
     }
 
     /**
-     * Log one finished translation instead of posting it. The source
-     * and the answer are both included, so the result can be reviewed
-     * (and the prompt logic tweaked) straight from the log, without a
-     * second lookup. One block per toot, framed by markers for easy
-     * grepping.
+     * Log one finished translation: the source and the answer are both
+     * included, so the result can be reviewed (and the prompt logic
+     * tweaked) straight from the log, without a second lookup — also
+     * when the instance later rejects the post. One block per toot,
+     * framed by markers for easy grepping; the posted segments are
+     * logged individually by [TranslationPoster].
      * */
     private fun logTranslation(
         toot: Status,
@@ -177,13 +197,15 @@ class TranslationProcessor(
 
         is TranslationOutputException, is ChatCompletionException -> true
 
-        // data-driven fail-fast checks of one toot (e.g. the chunking
-        // limit of the posting milestone): the queue keeps moving
+        // data-driven fail-fast checks of one toot (the segment budget
+        // checks of TranslationChunks): the queue keeps moving
         is IllegalArgumentException -> true
 
-        // the instance no longer has the status: no later run can
-        // translate it
-        is MastoApiException -> e.httpCode == 404
+        // the instance permanently rejects this toot: the status is
+        // gone (404) or the reply payload is invalid (400/422, e.g. a
+        // custom character limit below the segment budget); no later
+        // run can post it as-is
+        is MastoApiException -> e.httpCode in PERMANENT_TOOT_HTTP_CODES
 
         is ChatApiException -> e.httpCode in ChatApiException.PAYLOAD_REJECTION_HTTP_CODES
 
@@ -192,5 +214,21 @@ class TranslationProcessor(
 
     companion object {
         private val logger = KotlinLogging.logger {}
+
+        /**
+         * Instance responses that mean this toot cannot be handled
+         * as-is, for [isTootSpecific]: the status is gone (404) or the
+         * payload is permanently invalid (400/422). 429 is absorbed by
+         * the poster's own backoff and never reaches the policy.
+         * */
+        private val PERMANENT_TOOT_HTTP_CODES = setOf(400, 404, 422)
+
+        /**
+         * Instance responses that mean our token is invalid or lacks
+         * the needed scope, for `processQueue`'s fail-fast branch:
+         * every following toot would fail identically. 429 is absorbed
+         * by the callers' own backoff and never reaches the policy.
+         * */
+        private val CREDENTIAL_HTTP_CODES = setOf(401, 403)
     }
 }

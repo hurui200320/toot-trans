@@ -60,21 +60,45 @@ The drain, per eligible toot:
    does not have: a content-warning-only toot answers a null content, and an
    answer that still drops a field the source has, at the end of the whole
    fallback sequence, fails that toot.
+4. Post (`llm/TranslationChunks.kt`, `masto/statuses/TranslationPoster.kt`):
+   split the answer into footer-carrying segments (paragraph → sentence → hard
+   cut, surrogate pairs never halved, the instance's 500-character budget with
+   the footer and the content warning reserved on every segment) and post them
+   as one connected reply chain: the first segment replies to the original,
+   every following one to the previous segment. The target language code tags
+   every segment, the translated content warning rides on the first segment
+   (with `sensitive` copied from the original), a `public` original yields
+   `unlisted` replies while any other visibility is kept (a `direct` reply
+   cannot carry the original's mentions and stays visible to this account
+   only, see the known limitations), and the original's id feeds the
+   `Idempotency-Key` of every segment, so a retried post cannot duplicate.
+   A body-less translation (a content-warning-only source) posts the footer
+   alone with the translated warning, since the instance rejects a status
+   that has no text at all.
 
-The finished translation is logged, not posted: one block per toot, framed by
+A 429 waits out the instance's rate-limit reset through the shared backoff
+policy and retries the same segment; 5xx responses and transport errors retry
+within the `transient*` budget; a partial chain left by a failure is cleaned
+up by the next run (see below).
+
+Every finished translation is also logged as one block per toot, framed by
 markers, carrying the source, both content warnings and the answer (see
 `TranslationProcessor.kt`), so the prompt and the result can be reviewed
-without touching the instance. Posting the translation as a reply chain is the
-next milestone.
+straight from the log — including when the instance later rejects the post;
+`TranslationPoster` logs each posted segment.
 
 Failure policy (see `TranslationProcessor`): toot-specific failures — an answer
 that stays unusable through the translator's retries and variant downgrades,
 a permanently rejected payload after the fallback sequence, a chain status
-deleted outside the application (a source read answering 404) — drop the toot
-with a loud log so the queue keeps moving; rate limits, server errors and
-transport errors stop the drain and leave everything queued for the next run.
-Credential/configuration failures (an LLM 4xx outside the payload set)
-propagate, because no following toot could succeed either.
+deleted outside the application (a source read answering 404), or an instance
+permanently rejecting the reply payload (400/422, e.g. a custom character
+limit) — drop the toot with a loud log so the queue keeps moving; rate limits,
+server errors and transport errors stop the drain and leave everything queued
+for the next run, while a posting failure also leaves the already-posted prefix
+in place for the next run's chain check to delete leaf-first and replace.
+Credential/configuration failures — an LLM 4xx outside the payload set, or the
+instance rejecting our token or permissions with 401/403 — propagate, because
+no following toot could succeed either.
 
 The chain rules — what counts as a complete chain, why stale chains are
 accepted (one-shot), the language scoping for deployments sharing one
@@ -86,10 +110,16 @@ The queue only decides what enters the work window; see
 
 ### Known limitations (current stage)
 
-- Nothing is posted yet: the drain logs each finished translation and drops
-  the entry, so the prompt and its output can be reviewed without touching
-  the instance. Splitting the answer into footer-carrying segments and posting
-  them as a reply chain is the next milestone.
+- The instance's actual per-toot character limit is not read yet (a future
+  `GET /api/v2/instance` milestone): segments are sized against the default
+  500, so an instance with a smaller limit permanently rejects its
+  translations (the toot is skipped with a loud log while it stays in the
+  scan window).
+- A `direct` original's translation is a `direct` reply without the original's
+  mentions, so the accounts the original was addressed to cannot see it:
+  Mastodon scopes direct statuses to the author and the mentioned accounts,
+  and the reply copies no mentions. The translation stays visible to this
+  account only.
 - The periodic cursor-based scan is not implemented: the process drains the
   boot scan and exits, and the in-memory window is rebuilt on the next run.
   Run it in a loop or from cron until the polling milestone lands.
@@ -100,9 +130,9 @@ The queue only decides what enters the work window; see
 - Segments made unreachable by a parent deleted outside this application
   are not discovered and stay on the instance; clean up manually.
 - A permanently rejected toot (content filter, a model without the needed
-  capabilities even after the fallback sequence) is skipped for that run and
-  retried on the next one; a provider that rejects everything keeps producing
-  loud logs.
+  capabilities even after the fallback sequence, or an instance rejecting the
+  reply payload) is skipped for that run and retried on the next one; a
+  provider that rejects everything keeps producing loud logs.
 
 ## Access Token
 

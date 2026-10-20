@@ -31,6 +31,7 @@ import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
 import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
+import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationPoster
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -171,6 +172,28 @@ fun appModule(
         StatusesDeleter(get(), get(), get())
     }
 
+    // posts the translation as the connected reply chain; the target
+    // language comes from config, the shared backoff paces its 429
+    // retries, and the transient* settings are validated here through
+    // the predicates shared with the scan and the chat client (see
+    // `config/Validation.kt`), so a bad value fails naming the setting
+    single<TranslationPoster> {
+        TranslationPoster(
+            client = get(),
+            pool = get(),
+            targetLangCode = config.targetLangCode,
+            rateLimitBackoff = get(),
+            transientMaxRetry = requireValidTransientMaxRetry(
+                "Config `transientMaxRetry`",
+                config.transientMaxRetry,
+            ),
+            transientRetryDelay = requireValidRetryDelay(
+                "Config `transientRetryDelay`",
+                config.transientRetryDelay,
+            ),
+        )
+    }
+
     // downloads the current toot's images for the vision input; media
     // URLs are served publicly, so the shared client is used without
     // auth, and the caps live on the interface
@@ -212,7 +235,7 @@ fun appModule(
         )
     }
 
-    // the queue drain: context -> translate -> log, with the failure
+    // the queue drain: context -> translate -> post, with the failure
     // policy documented on TranslationProcessor
     single<TranslationProcessor> {
         TranslationProcessor(
@@ -221,6 +244,7 @@ fun appModule(
             deleter = get(),
             contextBuilder = get(),
             translator = get(),
+            poster = get(),
         )
     }
 

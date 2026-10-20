@@ -27,6 +27,7 @@ import info.skyblond.fediverse.toot.trans.masto.statuses.PendingQueue
 import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
+import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationPoster
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -183,6 +184,10 @@ class AppModuleTest {
             // config must resolve it too (the wrapper type is pinned
             // by the dedicated test below)
             app.koin.get<ChatClient>()
+            // the poster has no account dependency either: a complete
+            // config must resolve it on top of the pool and the shared
+            // backoff
+            app.koin.get<TranslationPoster>()
 
             // CredentialAccount is left out here: its resolution performs
             // network IO, so it gets the dedicated MockWebServer-backed

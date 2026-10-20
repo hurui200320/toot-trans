@@ -10,6 +10,7 @@ import info.skyblond.fediverse.toot.trans.llm.client.ChatCompletionRequest
 import info.skyblond.fediverse.toot.trans.llm.completionResponse
 import info.skyblond.fediverse.toot.trans.llm.translationAnswer
 import info.skyblond.fediverse.toot.trans.masto.MastoApiException
+import info.skyblond.fediverse.toot.trans.masto.RateLimitBackoff
 import info.skyblond.fediverse.toot.trans.masto.client.media.LoadedMedia
 import info.skyblond.fediverse.toot.trans.masto.client.media.MediaLoader
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
@@ -19,6 +20,7 @@ import info.skyblond.fediverse.toot.trans.masto.statuses.ReplyChainContext
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool
 import info.skyblond.fediverse.toot.trans.masto.statuses.StatusesDeleter
 import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationClientFake
+import info.skyblond.fediverse.toot.trans.masto.statuses.TranslationPoster
 import info.skyblond.fediverse.toot.trans.masto.statuses.fetched
 import info.skyblond.fediverse.toot.trans.masto.statuses.now
 import info.skyblond.fediverse.toot.trans.masto.statuses.original
@@ -30,7 +32,9 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -43,8 +47,9 @@ import kotlin.time.Duration.Companion.minutes
 
 /**
  * The queue drain of [TranslationProcessor]: order, skipping, obsolete
- * cleanup, and the failure policy, over real queue/pool/chain/delete
- * components and a fake instance + chat client.
+ * cleanup, posting and the failure policy, over real
+ * queue/pool/chain/delete/poster components and a fake instance + chat
+ * client.
  * */
 class TranslationProcessorTest {
     private class Fixture(
@@ -66,6 +71,19 @@ class TranslationProcessorTest {
             },
             maxDepth = 3,
         )
+        // posting takes the shortest legal path: no transient retries (a
+        // failing segment surfaces immediately) and a fixed clock, so
+        // seeded fetch instants are deterministic
+        val clock = Clock.fixed(now, ZoneOffset.UTC)
+        val poster = TranslationPoster(
+            client = clientFake.client,
+            pool = pool,
+            targetLangCode = "en",
+            rateLimitBackoff = RateLimitBackoff(clock = clock),
+            transientMaxRetry = 0,
+            transientRetryDelay = 1.milliseconds,
+            clock = clock,
+        )
         val processor = TranslationProcessor(
             queue = queue,
             cooldown = cooldown,
@@ -75,6 +93,7 @@ class TranslationProcessorTest {
                 chat,
                 TranslationRequestFactory("English", "test-model", null, 100, null),
             ),
+            poster = poster,
         )
 
         suspend fun feed(fetchedAt: Instant = now) {
@@ -96,15 +115,38 @@ class TranslationProcessorTest {
     @Test
     fun `translates the head and drops it`() {
         runTest {
-            val f = Fixture(this, listOf(original("P")))
+            val p = original("P")
+            val f = Fixture(this, listOf(p))
             f.feed()
             f.chat.answerWith(translationAnswer("Hello"))
 
             f.processor.processQueue()
 
             assertEquals(1, f.chat.requests.size)
+            // the answer is posted as one connected reply carrying the footer
+            val draft = f.clientFake.createRequests.single()
+            assertEquals("Hello\n\n🌐${p.crc32()}#1#1", draft.status)
+            assertEquals("P", draft.inReplyToId)
+            assertEquals("en", draft.language)
             assertFalse(f.queue.hasNext())
             assertEquals("P", f.queue.cursor())
+        }
+    }
+
+    @Test
+    fun `a content-warning-only toot is posted as a footer-only reply`() {
+        runTest {
+            val p = original("P").copy(content = null, spoilerText = "天気")
+            val f = Fixture(this, listOf(p))
+            f.feed()
+            f.chat.answerWith(translationAnswer(content = null, spoilerText = "Weather"))
+
+            f.processor.processQueue()
+
+            val draft = f.clientFake.createRequests.single()
+            assertEquals("🌐${p.crc32()}#1#1", draft.status)
+            assertEquals("Weather", draft.spoilerText)
+            assertFalse(f.queue.hasNext())
         }
     }
 
@@ -184,6 +226,8 @@ class TranslationProcessorTest {
 
             assertEquals(listOf("T2", "T1"), f.clientFake.deleteRequests)
             assertEquals(1, f.chat.requests.size)
+            // the replacement is posted
+            assertEquals(1, f.clientFake.createRequests.size)
             assertFalse(f.queue.hasNext())
         }
     }
@@ -205,6 +249,7 @@ class TranslationProcessorTest {
             // the next run re-feeds it and retranslates from scratch
             assertEquals(listOf("T2", "T1"), f.clientFake.deleteRequests)
             assertEquals(8, f.chat.requests.size)
+            assertTrue(f.clientFake.createRequests.isEmpty())
             assertFalse(f.queue.hasNext())
             assertEquals("P", f.queue.cursor())
         }
@@ -347,6 +392,84 @@ class TranslationProcessorTest {
             assertEquals("Q", f.queue.cursor())
             assertEquals(1, f.chat.requests.size)
             assertTrue(targetText(f.chat.requests.single()).contains("body Q"))
+            // and Q's translation is posted
+            assertEquals(1, f.clientFake.createRequests.size)
+        }
+    }
+
+    @Test
+    fun `an instance that permanently rejects a post drops the toot and continues`() {
+        runTest {
+            for (code in listOf(400, 422)) {
+                val q = original("Q")
+                val f = Fixture(this, listOf(original("P"), q))
+                f.feed()
+                f.chat.answerWith(translationAnswer("Hello"))
+                f.clientFake.create = { draft ->
+                    if (draft.inReplyToId == "P") throw MastoApiException(code, "too long")
+                    f.clientFake.generatedSegment(draft)
+                }
+
+                f.processor.processQueue()
+
+                // P is dropped for good, Q still gets posted
+                assertEquals(listOf("P", "Q"), f.clientFake.createRequests.map { it.inReplyToId }, "HTTP $code")
+                assertFalse(f.queue.hasNext(), "HTTP $code")
+                assertEquals("Q", f.queue.cursor(), "HTTP $code")
+            }
+        }
+    }
+
+    @Test
+    fun `an instance credential failure propagates instead of draining every toot`() {
+        runTest {
+            for (code in listOf(401, 403)) {
+                val f = Fixture(this, listOf(original("P")))
+                f.feed()
+                f.chat.answerWith(translationAnswer("Hello"))
+                f.clientFake.create = { throw MastoApiException(code, "rejected") }
+
+                assertFailsWith<MastoApiException> { f.processor.processQueue() }
+                // the entry stays queued for a run with working credentials
+                assertTrue(f.queue.hasNext(), "HTTP $code")
+                assertNull(f.queue.cursor(), "HTTP $code")
+            }
+        }
+    }
+
+    @Test
+    fun `a partial post stops the drain and the next run cleans it up leaf-first`() {
+        runTest {
+            val p = original("P")
+            val f = Fixture(this, listOf(p))
+            f.feed()
+            f.chat.answerWith(translationAnswer("a".repeat(461)))
+            f.clientFake.create = { draft ->
+                if (draft.inReplyToId == "P") f.clientFake.generatedSegment(draft)
+                else throw MastoApiException(500, "boom")
+            }
+
+            // the first segment is posted, the second fails and stops the
+            // drain with the entry still queued
+            f.processor.processQueue()
+            assertTrue(f.queue.hasNext())
+            assertEquals(listOf("P", "created-1"), f.clientFake.createRequests.map { it.inReplyToId })
+
+            // the next run sees the partial chain, deletes it leaf-first
+            // and posts the replacement
+            f.clientFake.create = { draft -> f.clientFake.generatedSegment(draft) }
+            f.chat.answerWith(translationAnswer("Hello again"))
+            f.processor.processQueue()
+
+            assertEquals(listOf("created-1"), f.clientFake.deleteRequests)
+            // the replacement is one connected segment again
+            assertEquals(
+                listOf("P", "created-1", "P"),
+                f.clientFake.createRequests.map { it.inReplyToId },
+            )
+            assertTrue(f.clientFake.createRequests.last().status.endsWith("\n\n🌐${p.crc32()}#1#1"))
+            assertFalse(f.queue.hasNext())
+            assertEquals("P", f.queue.cursor())
         }
     }
 
@@ -369,6 +492,36 @@ class TranslationProcessorTest {
             assertEquals(4, cRequest.messages.size)
             val assistant = Json.parseToJsonElement(messageJson(cRequest, 2)).jsonObject
             assertEquals("Translated", assistant["content"]?.jsonPrimitive?.content)
+            assertFalse(messageJson(cRequest, 2).contains(MISSING_TRANSLATION_PLACEHOLDER))
+        }
+    }
+
+    @Test
+    fun `a translation posted earlier in the run feeds the child's context`() {
+        runTest {
+            val p = original("P")
+            val child = original("C", "P").copy(createdAt = now.minusSeconds(120))
+            val f = Fixture(this, listOf(p, child))
+            f.feed()
+            f.chat.handler = { request ->
+                if (targetText(request).contains("body P")) {
+                    completionResponse(translationAnswer("Hello P"))
+                } else {
+                    completionResponse(translationAnswer("Hello C"))
+                }
+            }
+
+            f.processor.processQueue()
+
+            // the parent is translated and posted first, and the child's
+            // request carries the just-posted reply as its history
+            assertEquals(listOf("P", "C"), f.clientFake.createRequests.map { it.inReplyToId })
+            val cRequest = f.chat.requests.last()
+            val assistant = Json.parseToJsonElement(messageJson(cRequest, 2)).jsonObject
+            // the posted reply is "Hello P\n\n🌐..."; stripping the footer
+            // line keeps the blank separator, so the history carries the
+            // body with its trailing newline
+            assertEquals("Hello P\n", assistant["content"]?.jsonPrimitive?.content)
             assertFalse(messageJson(cRequest, 2).contains(MISSING_TRANSLATION_PLACEHOLDER))
         }
     }

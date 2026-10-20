@@ -51,6 +51,9 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
   the conventional environment variables (`HTTPS_PROXY` and friends).
 - `masto/statuses/TranslationChain.kt`: in-memory reconstruction and
   classification of an original's translation chain.
+- `masto/statuses/TranslationPoster.kt`: posting one translation as the
+  original's reply chain: per-segment idempotency, the
+  visibility/CW/sensitive rules and the 429/transient retry policy.
 - `masto/statuses/ReplyChainContext.kt`: the LLM context builder: ancestor
   walk via the pool, source fetches, translated-ancestor resolution and the
   bounded target media downloads.
@@ -68,6 +71,9 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
 - `llm/client/Models.kt`: Chat Completions wire models.
 - `llm/Footer.kt`: the `🌐{hash}#{seq}#{total}` reply marker: rendering,
   matching and stripping.
+- `llm/TranslationChunks.kt`: the segment character budget and the greedy
+  paragraph → sentence → hard-cut segmentation that packs one translation
+  into footer-carrying segments.
 - `llm/TranslationRequestFactory.kt`: the prompt contract (JSON answer shape,
   history pairing, context blocks), the always-sent strict `response_format`
   schema and the three request variants.
@@ -94,10 +100,9 @@ chat completion API settings.
 
 The translation stage is the queue drain `TranslationProcessor.kt` runs:
 context (`masto/statuses/ReplyChainContext.kt`) → translate
-(`llm/Translator.kt`) → log. Posting the translation as a reply chain is not
-implemented yet: the finished translation is logged for review and the entry
-is dropped. Periodic polling is not implemented yet: `Main.kt` scans once,
-drains, and exits.
+(`llm/Translator.kt`) → log for review → post (`llm/TranslationChunks.kt` +
+`masto/statuses/TranslationPoster.kt`). Periodic polling is not implemented
+yet: `Main.kt` scans once, drains, and exits.
 
 ## Mastodon rate limits
 
@@ -121,9 +126,10 @@ exhausted bucket returns HTTP 429. This project's traffic touches:
   exhaustion; windows are fixed wall-clock periods, not sliding.
 - Steady-state budget is tiny (one poll/min ≈ 1.6% of the token bucket).
 - `MastoApiClient.kt` exposes `X-RateLimit-Reset` on 429 in
-  `MastoApiException.rateLimitReset`; `StatusesCachePool.kt` and
-  `StatusesDeleter.kt` consume it for pooled lookups and deletions
-  respectively. Other API traffic must handle its own rate limits.
+  `MastoApiException.rateLimitReset`; `StatusesCachePool.kt`,
+  `StatusesDeleter.kt` and `TranslationPoster.kt` consume it for pooled
+  lookups, deletions and posting respectively. Other API traffic must
+  handle its own rate limits.
 
 ## Verification commands
 
