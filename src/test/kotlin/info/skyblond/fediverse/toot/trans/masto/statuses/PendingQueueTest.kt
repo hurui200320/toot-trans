@@ -353,6 +353,39 @@ class PendingQueueTest {
     }
 
     @Test
+    fun `cursor bootstrap drops the head and records it`() = runTest {
+        val f = PendingQueueFixture(this, listOf(original("A"), original("B"), original("C")))
+        f.feed()
+        assertNull(f.queue.cursor())
+
+        val cursor = f.queue.dropHeadAndRecordCursor()
+
+        // the head is gone without being processed, and the cursor
+        // resumes right after it; the rest of the window stays queued
+        assertEquals("A", cursor)
+        assertEquals("A", f.queue.cursor())
+        assertTrue(f.queue.hasNext())
+        assertEquals("B", f.queue.next().status.id)
+        assertEquals(listOf("B", "C"), f.drain().map { it.id })
+        assertEquals("C", f.queue.cursor())
+    }
+
+    @Test
+    fun `cursor bootstrap on an empty window returns null and leaves the cursor untouched`() = runTest {
+        val empty = PendingQueueFixture(this, emptyList())
+        assertNull(empty.queue.dropHeadAndRecordCursor())
+        assertNull(empty.queue.cursor())
+
+        // a drained window keeps its last head as the cursor
+        val drained = PendingQueueFixture(this, listOf(original("A"), original("B")))
+        drained.feed()
+        drained.drain()
+        assertEquals("B", drained.queue.cursor())
+        assertNull(drained.queue.dropHeadAndRecordCursor())
+        assertEquals("B", drained.queue.cursor())
+    }
+
+    @Test
     fun `draining the window advances the cursor to the last head`() = runTest {
         val f = PendingQueueFixture(this, listOf(original("A"), original("B")))
         f.feed()

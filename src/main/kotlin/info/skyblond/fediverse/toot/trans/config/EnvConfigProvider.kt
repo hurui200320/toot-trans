@@ -40,6 +40,9 @@ class EnvConfigProvider(
     override val initialScanSize: Int?
         get() = int("INITIAL_SCAN_SIZE")
 
+    override val scanInterval: Duration?
+        get() = duration("SCAN_INTERVAL")
+
     override val transientMaxRetry: Int?
         get() = int("TRANSIENT_MAX_RETRY")
 

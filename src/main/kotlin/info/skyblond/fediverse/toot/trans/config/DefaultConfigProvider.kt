@@ -1,5 +1,6 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.DEFAULT_SCAN_INTERVAL
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
 import info.skyblond.fediverse.toot.trans.llm.client.OkHttpChatClient
@@ -35,6 +36,10 @@ class DefaultConfigProvider : ConfigProvider {
     // endpoint, single-sourced from [AccountsClient.GET_STATUSES_LIMIT]
     // so it cannot drift apart either
     override val initialScanSize: Int = AccountsClient.GET_STATUSES_LIMIT
+
+    // optional, the loop's scan cadence, single-sourced in `Main.kt`
+    // like the transient retry defaults in `Scan.kt`
+    override val scanInterval: Duration = DEFAULT_SCAN_INTERVAL
 
     // optional, defaults for the global transient-failure retry policy,
     // single-sourced in `Scan.kt`'s constants so they cannot drift

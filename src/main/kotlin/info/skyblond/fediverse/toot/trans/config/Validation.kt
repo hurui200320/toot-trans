@@ -6,7 +6,7 @@ import kotlin.time.Duration
  * Shared predicate of the transient retry contract: a retry delay must
  * be finite and at least 1ms, so a retry loop always waits a real
  * amount of time. Every consumer of the `transient*` settings — the
- * boot-up scan (`performInitialScan` in `Scan.kt`), the LLM retry
+ * scans (`performInitialScan`/`performIncrementalScan` in `Scan.kt`), the LLM retry
  * wrapper (`RetryingChatClient`) and the DI module — runs its value
  * through this one predicate, so the rule cannot drift apart; [name]
  * makes each error point at the layer that supplied the value (the
@@ -29,6 +29,21 @@ fun requireValidRetryDelay(name: String, value: Duration): Duration {
  * */
 fun requireValidTransientMaxRetry(name: String, value: Int): Int {
     require(value >= 0) { "$name must be non-negative, got $value" }
+    return value
+}
+
+/**
+ * Shared predicate of the scan loop's cadence contract: the interval
+ * must be finite and at least 1ms. The wait is the point — zero would
+ * turn the loop into back-to-back paging requests until the instance
+ * answers 429, and the rate-limit backoff would then dominate the
+ * runtime. Consumer: `Main.kt`'s scan loop, so a config value fails
+ * naming the setting before the loop starts.
+ * */
+fun requireValidScanInterval(name: String, value: Duration): Duration {
+    require(value.isFinite() && value.inWholeMilliseconds > 0) {
+        "$name must be finite and at least 1ms, got $value"
+    }
     return value
 }
 

@@ -29,7 +29,10 @@ import java.util.TreeSet
  * later scan resumes right after the cursor, and a cooling copy can only
  * ever pass [Cooldown] through a later fetch, because the recorded fetch
  * time never changes — so an entry the cursor skipped could never be
- * processed.
+ * processed. The one exception is the scan loop's bootstrap when no cursor
+ * exists yet ([dropHeadAndRecordCursor]): the bounded newest-window scan
+ * cannot guarantee it still covers the queued head, so that head is
+ * dropped without being processed to establish the cursor; see the method.
  *
  * Ordering is by [Status.createdAt] with [Status.id] breaking ties, never
  * by edit time: creation order keeps every parent ahead of its replies,
@@ -205,10 +208,32 @@ class PendingQueue(
 
     /**
      * The id of the last dropped head, or null before any head was dropped.
-     * A later scan resumes right after it (e.g. as a `since_id`) to avoid
+     * A later scan resumes right after it (e.g. as a `min_id`) to avoid
      * re-fetching already processed toots.
      * */
     suspend fun cursor(): String? = mutex.withLock { cursor }
+
+    /**
+     * Drop the current head without processing it and record it as the
+     * cursor; return null when the window is empty.
+     *
+     * This is the bootstrap for the rolling cursor, not a completion path:
+     * the scan loop calls it when no cursor exists yet, because the bounded
+     * newest-window scan cannot guarantee it still covers the queued head.
+     * New toots keep pushing that window forward, and a head blocked on the
+     * cooldown would then never be fetched again — the window would stall
+     * on it forever, since only a later fetch can pass the cooldown (see
+     * the class KDoc). Dropping it records the cursor exactly like a
+     * processed drop does, so the unbounded incremental scan takes over
+     * from there; the dropped entry itself is sacrificed (never translated).
+     *
+     * An empty window returns null and leaves the cursor untouched.
+     * */
+    suspend fun dropHeadAndRecordCursor(): String? = mutex.withLock {
+        val head = toots.firstOrNull() ?: return@withLock null
+        unsafeDrop(head.status.id)
+        cursor
+    }
 
     /**
      * Whether the window holds an entry for [next] to hand out.

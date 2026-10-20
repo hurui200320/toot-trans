@@ -80,6 +80,7 @@ class AppModuleTest {
         backoffFallbackDelay: Duration? = null,
         backoffMaxWaitDuration: Duration? = null,
         initialScanSize: Int? = null,
+        scanInterval: Duration? = null,
         transientMaxRetry: Int? = null,
         transientRetryDelay: Duration? = null,
         targetLanguage: String? = null,
@@ -108,6 +109,7 @@ class AppModuleTest {
                 override val backoffFallbackDelay: Duration? = backoffFallbackDelay
                 override val backoffMaxWaitDuration: Duration? = backoffMaxWaitDuration
                 override val initialScanSize: Int? = initialScanSize
+                override val scanInterval: Duration? = scanInterval
                 override val transientMaxRetry: Int? = transientMaxRetry
                 override val transientRetryDelay: Duration? = transientRetryDelay
                 override val targetLanguage: String? = targetLanguage

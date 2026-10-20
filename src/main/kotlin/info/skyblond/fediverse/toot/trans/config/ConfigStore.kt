@@ -50,6 +50,9 @@ class ConfigStore(
     override val initialScanSize: Int
         get() = getOrThrow("initial scan size") { it.initialScanSize }
 
+    override val scanInterval: Duration
+        get() = getOrThrow("scan interval") { it.scanInterval }
+
     override val transientMaxRetry: Int
         get() = getOrThrow("transient max retry") { it.transientMaxRetry }
 

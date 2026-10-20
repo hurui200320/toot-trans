@@ -14,7 +14,7 @@ import kotlin.time.Duration.Companion.seconds
  * rate-limited request into a wait duration. Callers on the same
  * token share the server's rate-limit buckets, so they back off
  * alike — currently [StatusesCachePool][info.skyblond.fediverse.toot.trans.masto.statuses.StatusesCachePool]'s
- * worker and the boot-up scan (see `Scan.kt`).
+ * worker and the scans (see `Scan.kt`).
  *
  * The wait follows the instance's `X-RateLimit-Reset` header, exposed
  * on [MastoApiException.rateLimitReset]: a usable reset — parseable,

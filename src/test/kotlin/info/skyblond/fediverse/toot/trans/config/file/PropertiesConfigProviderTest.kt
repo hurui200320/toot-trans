@@ -127,6 +127,7 @@ class PropertiesConfigProviderTest {
         assertNull(provider.poolMaxCacheEntries)
         assertNull(provider.backoffFallbackDelay)
         assertNull(provider.initialScanSize)
+        assertNull(provider.scanInterval)
         assertNull(provider.transientMaxRetry)
         assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
@@ -142,6 +143,24 @@ class PropertiesConfigProviderTest {
         val provider = PropertiesConfigProvider(file)
 
         assertEquals(20, provider.initialScanSize)
+    }
+
+    @Test
+    fun `reads the scan interval from the properties file`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("scanInterval=30s\n")
+
+        assertEquals(30.seconds, PropertiesConfigProvider(file).scanInterval)
+        file.writeText("scanInterval=   \n")
+        assertNull(PropertiesConfigProvider(file).scanInterval)
+    }
+
+    @Test
+    fun `malformed scan interval names properties key`(@TempDir tempDir: File) {
+        val file = tempDir.resolve("config.properties")
+        file.writeText("scanInterval=soon\n")
+        val e = assertFailsWith<IllegalArgumentException> { PropertiesConfigProvider(file).scanInterval }
+        assertTrue(e.message!!.contains("scanInterval"))
     }
 
     @Test

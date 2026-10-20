@@ -57,15 +57,24 @@ interface ConfigProvider {
     val backoffMaxWaitDuration: Duration?
 
     /**
-     * Amount of the owner's latest toots the boot-up scan fetches;
+     * Amount of the owner's latest toots the newest-window scan fetches
+     * (at boot, and in the scan loop while no rolling cursor exists yet);
      * 0 disables the scan. The scan semantics live with the scan
      * itself: see `performInitialScan` in `Scan.kt`.
      * */
     val initialScanSize: Int?
 
     /**
+     * Wait between the end of one queue drain and the next scan; must be
+     * finite and at least 1ms (the wait is the point). The loop semantics
+     * live with the loop: see `Main.kt`, and `performIncrementalScan` in
+     * `Scan.kt` for the cursor-based scan it runs.
+     * */
+    val scanInterval: Duration?
+
+    /**
      * Retry budget for transient failures (5xx, transport), shared
-     * globally: the boot-up scan spends it per page and the LLM chat
+     * globally: the scans spend it per page and the LLM chat
      * transport spends it as its attempt budget; 0 disables such
      * retries. Each consumer's retry policy lives with the consumer:
      * see `performInitialScan` in `Scan.kt` and [RetryingChatClient].
@@ -89,7 +98,7 @@ interface ConfigProvider {
     /**
      * Maximum age of a toot at fetch time for it to be eligible for
      * translation: toots that are already older when fetched are
-     * skipped, so a big boot-up scan or a catch-up after downtime
+     * skipped, so a big newest-window scan or a catch-up after downtime
      * cannot suddenly translate and reply to toots from days ago. The
      * age is measured as `editedAt ?: createdAt`, so an edit counts as
      * the toot becoming current again, and zero disables the cutoff.

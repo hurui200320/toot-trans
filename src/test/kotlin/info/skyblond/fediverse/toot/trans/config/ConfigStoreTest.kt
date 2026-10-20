@@ -1,5 +1,6 @@
 package info.skyblond.fediverse.toot.trans.config
 
+import info.skyblond.fediverse.toot.trans.DEFAULT_SCAN_INTERVAL
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_MAX_RETRY
 import info.skyblond.fediverse.toot.trans.DEFAULT_TRANSIENT_RETRY_DELAY
 import info.skyblond.fediverse.toot.trans.config.exception.MissingConfigException
@@ -21,6 +22,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toKotlinDuration
 
@@ -35,6 +37,7 @@ class ConfigStoreTest {
         backoffFallbackDelay: Duration? = null,
         backoffMaxWaitDuration: Duration? = null,
         initialScanSize: Int? = null,
+        scanInterval: Duration? = null,
         transientMaxRetry: Int? = null,
         transientRetryDelay: Duration? = null,
         targetLanguage: String? = null,
@@ -61,6 +64,7 @@ class ConfigStoreTest {
         override val backoffFallbackDelay: Duration? = backoffFallbackDelay
         override val backoffMaxWaitDuration: Duration? = backoffMaxWaitDuration
         override val initialScanSize: Int? = initialScanSize
+        override val scanInterval: Duration? = scanInterval
         override val transientMaxRetry: Int? = transientMaxRetry
         override val transientRetryDelay: Duration? = transientRetryDelay
         override val targetLanguage: String? = targetLanguage
@@ -378,6 +382,27 @@ class ConfigStoreTest {
         )
 
         assertEquals(AccountsClient.GET_STATUSES_LIMIT, store.initialScanSize)
+    }
+
+    @Test
+    fun `scan interval respects precedence null fallback and built-in default`() {
+        val store = ConfigStore(listOf(
+            provider(), provider(scanInterval = 30.seconds), provider(scanInterval = 5.minutes),
+        ))
+        assertEquals(30.seconds, store.scanInterval)
+        val defaults = ConfigStore(listOf(provider(), DefaultConfigProvider()))
+        assertEquals(DEFAULT_SCAN_INTERVAL, defaults.scanInterval)
+    }
+
+    @Test
+    fun `missing and malformed scan interval fail rather than falling through`() {
+        val missing = assertFailsWith<MissingConfigException> { ConfigStore(listOf(provider())).scanInterval }
+        assertTrue(missing.message!!.contains("scan interval"))
+        val store = ConfigStore(listOf(
+            EnvConfigProvider(mapOf("SCAN_INTERVAL" to "soon")::get), DefaultConfigProvider(),
+        ))
+        val malformed = assertFailsWith<IllegalArgumentException> { store.scanInterval }
+        assertTrue(malformed.message!!.contains("SCAN_INTERVAL"))
     }
 
     @Test

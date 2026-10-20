@@ -66,6 +66,7 @@ class EnvConfigProviderTest {
         assertNull(provider.poolMaxCacheEntries)
         assertNull(provider.backoffFallbackDelay)
         assertNull(provider.initialScanSize)
+        assertNull(provider.scanInterval)
         assertNull(provider.transientMaxRetry)
         assertNull(provider.transientRetryDelay)
         assertNull(provider.translationCooldown)
@@ -87,6 +88,20 @@ class EnvConfigProviderTest {
         val provider = EnvConfigProvider(mapOf("INITIAL_SCAN_SIZE" to "20")::get)
 
         assertEquals(20, provider.initialScanSize)
+    }
+
+    @Test
+    fun `reads the scan interval from the environment`() {
+        assertEquals(30.seconds, EnvConfigProvider(mapOf("SCAN_INTERVAL" to "30s")::get).scanInterval)
+    }
+
+    @Test
+    fun `blank scan interval is unset and malformed names variable`() {
+        assertNull(EnvConfigProvider(mapOf("SCAN_INTERVAL" to " ")::get).scanInterval)
+        val e = assertFailsWith<IllegalArgumentException> {
+            EnvConfigProvider(mapOf("SCAN_INTERVAL" to "soon")::get).scanInterval
+        }
+        assertTrue(e.message!!.contains("SCAN_INTERVAL"))
     }
 
     @Test

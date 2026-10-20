@@ -52,11 +52,11 @@ import kotlin.time.Duration
  * the shared transient retry budget ([transientMaxRetry],
  * [transientRetryDelay]); anything else propagates, leaving whatever
  * was already posted in place. That partial chain is exactly what the
- * next run's chain classification reports as invalid and cleans up
+ * next drain cycle's chain classification reports as invalid and cleans up
  * leaf-first ([StatusesDeleter]) before retranslating.
  *
  * Every created segment is seeded into [pool] with [clock]'s fetch
- * instant, so a descendant processed later in the same run sees its
+ * instant, so a descendant processed later in the same drain cycle sees its
  * ancestor's fresh translation through
  * [PendingQueue.findTranslationChainState].
  * */

@@ -31,7 +31,7 @@ import kotlinx.coroutines.CancellationException
  *
  * An ancestor's translation is resolved through
  * [PendingQueue.findTranslationChainState] (window merged with the
- * pool, so a translation posted earlier in the same run is visible)
+ * pool, so a translation posted earlier in the same drain cycle is visible)
  * and only a complete, valid chain contributes; its segments are
  * joined in footer order with the markers stripped
  * ([removeFooterFromText]), and its first segment's spoiler text, when

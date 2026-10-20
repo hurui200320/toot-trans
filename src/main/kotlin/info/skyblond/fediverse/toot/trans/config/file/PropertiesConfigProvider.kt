@@ -66,6 +66,9 @@ class PropertiesConfigProvider(
     override val initialScanSize: Int?
         get() = int("initialScanSize")
 
+    override val scanInterval: Duration?
+        get() = duration("scanInterval")
+
     override val transientMaxRetry: Int?
         get() = int("transientMaxRetry")
 

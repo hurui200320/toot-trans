@@ -17,13 +17,23 @@ as to the code, they are already in English.
 ## Current implementation
 
 The application performs one startup scan, feeds the pending queue
-(`masto/statuses/PendingQueue.kt`), and drains it through the translation stage
-(`TranslationProcessor.kt`). The queue is the work window: `feed` runs the
-entrance filter, `next` hands out the oldest entry, and `drop` removes a
-processed one. Dropping the queue head records it as the rolling cursor, so a
-later incremental scan can resume right after it; entries still inside the
-cooldown stay queued, so the cursor never skips something unprocessed. Ordering
-is by creation time, which keeps every parent ahead of its replies.
+(`masto/statuses/PendingQueue.kt`), drains it through the translation stage
+(`TranslationProcessor.kt`), then loops: wait `scanInterval`, re-scan from the
+rolling cursor to the latest toots, feed the queue, and drain again. A drain
+ends either cleared or blocked (a toot still cooling down, or a failure that
+stops the drain); both outcomes wait out the interval and continue with the
+next scan — a blocked drain is not terminal. The queue is the work window:
+`feed` runs the entrance filter, `next` hands out the oldest entry, and `drop`
+removes a processed one. Dropping the queue head records it as the rolling
+cursor, and the incremental scan resumes right after it (`min_id` paging, see
+`Scan.kt`); entries still inside the cooldown stay queued and are refreshed by
+the next scan, so the cursor never skips something unprocessed. Ordering is by
+creation time, which keeps every parent ahead of its replies. While no cursor
+exists yet (nothing was ever dropped), the loop repeats the bounded startup
+scan; once a drain leaves entries queued without a cursor, the next scan drops
+that queue head to establish the cursor
+(`PendingQueue.dropHeadAndRecordCursor`), because the bounded window cannot
+guarantee it still covers that head as new toots arrive.
 
 > Mastodon lists the owner's statuses newest-first by status ID (creation
 > order; edits do not reorder the listing). A translation reply is always
@@ -79,7 +89,7 @@ The drain, per eligible toot:
 A 429 waits out the instance's rate-limit reset through the shared backoff
 policy and retries the same segment; 5xx responses and transport errors retry
 within the `transient*` budget; a partial chain left by a failure is cleaned
-up by the next run (see below).
+up by the next drain cycle (see below).
 
 Every finished translation is also logged as one block per toot, framed by
 markers, carrying the source, both content warnings and the answer (see
@@ -94,11 +104,15 @@ deleted outside the application (a source read answering 404), or an instance
 permanently rejecting the reply payload (400/422, e.g. a custom character
 limit) — drop the toot with a loud log so the queue keeps moving; rate limits,
 server errors and transport errors stop the drain and leave everything queued
-for the next run, while a posting failure also leaves the already-posted prefix
-in place for the next run's chain check to delete leaf-first and replace.
-Credential/configuration failures — an LLM 4xx outside the payload set, or the
-instance rejecting our token or permissions with 401/403 — propagate, because
-no following toot could succeed either.
+for the next scan cycle, while a posting failure also leaves the already-posted
+prefix in place for the next cycle's chain check to delete leaf-first and
+replace. The one exception to that retry rule is the no-cursor bootstrap
+described above: the loop drops the blocked head to establish the cursor,
+logging it, so that entry is not retried. Credential/configuration failures —
+an LLM 4xx outside the payload set, or the instance rejecting our token or
+permissions with 401/403 — propagate, because no following toot could succeed
+either; the process then exits (fail-fast), and a restart rebuilds the window
+from a fresh boot scan.
 
 The chain rules — what counts as a complete chain, why stale chains are
 accepted (one-shot), the language scoping for deployments sharing one
@@ -120,19 +134,20 @@ The queue only decides what enters the work window; see
   Mastodon scopes direct statuses to the author and the mentioned accounts,
   and the reply copies no mentions. The translation stays visible to this
   account only.
-- The periodic cursor-based scan is not implemented: the process drains the
-  boot scan and exits, and the in-memory window is rebuilt on the next run.
-  Run it in a loop or from cron until the polling milestone lands.
 - A translated original is never refreshed: the one-shot policy accepts a
   complete chain even when the original was edited afterwards. The footer
   hash lets a reader detect the mismatch; this project ships no tooling for
-  that yet.
+  that yet. The same applies to an original whose id is at or below the
+  rolling cursor: an edit does not change the id, so the incremental scan
+  never sees it again.
 - Segments made unreachable by a parent deleted outside this application
   are not discovered and stay on the instance; clean up manually.
 - A permanently rejected toot (content filter, a model without the needed
   capabilities even after the fallback sequence, or an instance rejecting the
-  reply payload) is skipped for that run and retried on the next one; a
-  provider that rejects everything keeps producing loud logs.
+  reply payload) is dropped from the window with a loud log; because it is the
+  window head, its drop advances the rolling cursor past it, so it is not
+  retried automatically. A provider that rejects everything keeps producing
+  loud logs for the toots that follow.
 
 ## Access Token
 
@@ -187,6 +202,7 @@ built).
 | Backoff fallback delay | `BACKOFF_FALLBACK_DELAY` | `backoffFallbackDelay` | No, default `10s` | `30s` |
 | Backoff max wait duration | `BACKOFF_MAX_WAIT_DURATION` | `backoffMaxWaitDuration` | No, default `24h` | `1h` |
 | Initial scan size | `INITIAL_SCAN_SIZE` | `initialScanSize` | No, default `40` | `20` |
+| Scan interval | `SCAN_INTERVAL` | `scanInterval` | No, default `1m` | `30s` |
 | Transient max retry | `TRANSIENT_MAX_RETRY` | `transientMaxRetry` | No, default `10` | `5` |
 | Transient retry delay | `TRANSIENT_RETRY_DELAY` | `transientRetryDelay` | No, default `10s` | `30s` |
 | Translation cooldown | `TRANSLATION_COOLDOWN` | `translationCooldown` | No, default `3m`; `0s` disables | `1m` |
@@ -209,14 +225,25 @@ are documented in its KDoc in
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/statuses/StatusesCachePool.kt`,
 and the `backoff*` ones tune
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/masto/RateLimitBackoff.kt` —
-the 429 backoff policy shared by the pool's worker, the boot-up scan, and
+the 429 backoff policy shared by the pool's worker, the scans, and
 status deletion, so they all honor these settings.
 The `initialScanSize` setting controls how many of the owner's latest toots
-the boot-up scan fetches; the pending queue seeds the pool from the scan
-result and performs the entrance filter (see `PendingQueue.feed`).
+the newest-window scan fetches (at boot, and in the loop while no cursor exists
+yet); the pending queue seeds the pool from the scan result and performs the
+entrance filter (see `PendingQueue.feed`).
+The `scanInterval` setting paces the loop: after each drain — cleared or
+blocked — it waits that long, then scans from the rolling cursor to the latest
+toots (`performIncrementalScan` in `Scan.kt`, `min_id` paging), feeds them and
+drains again (or repeats the bounded newest-window scan while no cursor exists
+yet). The wait has no disabled mode: one scan per minute is a few
+percent of the per-account paging bucket (300 requests / 15 minutes, see
+`AGENTS.md`), while a much smaller value mostly produces 429s that the shared
+backoff has to wait out. A catch-up after downtime pages through everything
+newer than the cursor, paced by that same backoff; `translationMaxAge` decides
+which of those toots still enter the work window.
 The `transient*` settings bound transient-failure retries globally (5xx and
 transport errors; 429 backoff is governed by the `backoff*` settings
-instead): the boot-up scan uses them per page, and the LLM client's retry
+instead): the scans use them per page, and the LLM client's retry
 wrapper derives its attempt budget and fixed delay from them, see
 `src/main/kotlin/info/skyblond/fediverse/toot/trans/Scan.kt`; the previous
 `scanTransient*` names are gone. For the LLM client this means one completion
@@ -225,7 +252,7 @@ that many retries), each attempt itself bounded by `llmReadTimeout`; the
 request walk can multiply that by its three variants (full/text/minimal) and by
 four answer attempts per variant (the initial completion plus three retries
 on an unusable answer) — so the budget multiplies the worst-case time a single
-translation can wait before the next run sees its failure.
+translation can wait before the next drain cycle sees its failure.
 The `target*` pair picks the translation output: `targetLanguage` is the
 plain-text language name (e.g. `English`, `Simplified Chinese`), and
 `targetLangCode` is the language tag (e.g. `en`, `zh-CN`) used to tag the
@@ -265,9 +292,11 @@ malformed or out-of-range value fails with an error naming the setting
 `0s`, `translationCooldown` and `translationMaxAge` which are finite and
 non-negative, and the `llm*`
 timeouts which are finite and non-negative, where `0` disables the timeout;
-`poolMaxCacheEntries` and `llmMaxCompletionTokens` must be positive;
+`scanInterval` is in the at-least-`1ms` group and cannot be disabled — the
+wait is the point; `poolMaxCacheEntries` and `llmMaxCompletionTokens` must be
+positive;
 `initialScanSize`, `transientMaxRetry`
-and `replyChainDepth` must be non-negative, where `0` disables the boot-up
+and `replyChainDepth` must be non-negative, where `0` disables the newest-window
 scan, transient retries and the LLM context respectively).
 
 The eligibility policy — the footered-reply/language/blank-body checks,
@@ -311,6 +340,7 @@ targetLangCode=en
 # llmReqExtra={}
 # replyChainDepth=3
 # translationMaxAge=1d
+# scanInterval=1m
 ```
 
 ### Proxy
@@ -413,7 +443,7 @@ reference, and the provider-specific notes live on `ChatCompletionRequest.extra`
   (408, 429, and all 5xx) are retried on a fixed delay with a bounded
   attempt budget (see `RetryingChatClient` for the exact policy); invalid requests,
   rejected keys, 402s and 403s, and malformed responses fail immediately, and a
-  failed translation is simply retried by the next run.
+  failed translation is simply retried by the next drain cycle.
 
 The client is wired into the application container: `ChatClient` resolves to
 `RetryingChatClient` over `OkHttpChatClient`, built from the `llm*` settings

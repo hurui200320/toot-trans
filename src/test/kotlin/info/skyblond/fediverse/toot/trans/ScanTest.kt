@@ -35,16 +35,19 @@ class ScanTest {
         val maxId: String?,
         val excludeReblogs: Boolean,
         val at: Long,
+        val minId: String? = null,
     )
 
     /**
      * Serves [statuses] (stored newest first, like the endpoint lists
-     * them) with `max_id` pagination: toots with ids below `maxId`,
-     * newest first, up to `limit`. Ids are numeric strings, compared
-     * as numbers. Each returned page is stamped with the virtual fetch
-     * time, like the real transport does. [failure] scripts an exception
-     * by call index (0-based, failed attempts included); null lets the
-     * call succeed.
+     * them) with `max_id` and `min_id` pagination: a `max_id` request
+     * returns the newest page below `maxId`, a `min_id` request returns
+     * the oldest page above `minId`, both up to `limit` and both newest
+     * first, mirroring the real endpoint's reversed upward page. Ids are
+     * numeric strings, compared as numbers. Each returned page is
+     * stamped with the virtual fetch time, like the real transport does.
+     * [failure] scripts an exception by call index (0-based, failed
+     * attempts included); null lets the call succeed.
      * */
     private class FakeAccountsClient(
         private val statuses: List<Status>,
@@ -64,14 +67,19 @@ class ScanTest {
             excludeReblogs: Boolean,
         ): List<FetchedStatus> {
             calls += GetStatusesCall(
-                accountId, limit, maxId, excludeReblogs, scope.testScheduler.currentTime
+                accountId, limit, maxId, excludeReblogs, scope.testScheduler.currentTime, minId
             )
             failure(calls.size - 1)?.let { throw it }
             val fetchedAt = epoch.plusMillis(scope.testScheduler.currentTime)
-            return statuses
-                .filter { maxId == null || it.id.toInt() < maxId.toInt() }
-                .take(limit)
-                .map { FetchedStatus(it, fetchedAt) }
+            val page = if (minId != null) {
+                // the oldest `limit` toots above minId, newest first
+                statuses.filter { it.id.toInt() > minId.toInt() }.takeLast(limit)
+            } else {
+                statuses
+                    .filter { maxId == null || it.id.toInt() < maxId.toInt() }
+                    .take(limit)
+            }
+            return page.map { FetchedStatus(it, fetchedAt) }
         }
     }
 
@@ -397,5 +405,128 @@ class ScanTest {
         // first failure propagates immediately
         assertEquals(401, e.httpCode)
         assertEquals(1, accounts.calls.size)
+    }
+
+    @Test
+    fun `incremental scan pages upward from the cursor and returns old to new`() = runTest {
+        // 100 toots, id 100 the newest; everything above id 10 is new
+        val accounts = FakeAccountsClient((100 downTo 1).map { status(it) }, this)
+
+        val result = performIncrementalScan(accounts, account, cursor = "10")
+
+        // each page resumes right above the previous page's newest entry
+        // (50, then 90); the last page is short (91..100), proving the
+        // account is caught up
+        assertEquals(
+            listOf(
+                GetStatusesCall("42", 40, null, true, 0, "10"),
+                GetStatusesCall("42", 40, null, true, 0, "50"),
+                GetStatusesCall("42", 40, null, true, 0, "90"),
+            ),
+            accounts.calls,
+        )
+        // old to new, which equals id order here
+        assertEquals((11..100).map { it.toString() }, result.map { it.status.id })
+    }
+
+    @Test
+    fun `incremental scan stops at a short page above the cursor`() = runTest {
+        val accounts = FakeAccountsClient((100 downTo 1).map { status(it) }, this)
+
+        val result = performIncrementalScan(accounts, account, cursor = "95")
+
+        // five newer toots: a single short page, no empty follow-up
+        assertEquals(listOf(GetStatusesCall("42", 40, null, true, 0, "95")), accounts.calls)
+        assertEquals((96..100).map { it.toString() }, result.map { it.status.id })
+    }
+
+    @Test
+    fun `incremental scan with nothing newer stops after one empty page`() = runTest {
+        val accounts = FakeAccountsClient((100 downTo 1).map { status(it) }, this)
+
+        val result = performIncrementalScan(accounts, account, cursor = "100")
+
+        assertEquals(0, result.size)
+        assertEquals(listOf(GetStatusesCall("42", 40, null, true, 0, "100")), accounts.calls)
+    }
+
+    @Test
+    fun `incremental scan caps the page at the configured limit`() = runTest {
+        val accounts = FakeAccountsClient((10 downTo 1).map { status(it) }, this)
+
+        val result = performIncrementalScan(accounts, account, cursor = "3", limit = 5)
+
+        // 7 newer toots, so a full 5-toot page then a short one
+        assertEquals(
+            listOf(
+                GetStatusesCall("42", 5, null, true, 0, "3"),
+                GetStatusesCall("42", 5, null, true, 0, "8"),
+            ),
+            accounts.calls,
+        )
+        assertEquals((4..10).map { it.toString() }, result.map { it.status.id })
+    }
+
+    @Test
+    fun `incremental scan waits out a 429 and retries the same page`() = runTest {
+        val accounts = FakeAccountsClient((100 downTo 1).map { status(it) }, this)
+        accounts.failure = { index ->
+            if (index == 0) MastoApiException(429, "limited", "2026-10-15T00:00:10Z") else null
+        }
+
+        val result = performIncrementalScan(
+            accounts, account, cursor = "99",
+            rateLimitBackoff = RateLimitBackoff(clock = testClock()),
+        )
+
+        // the retry asks for the identical page at the reset (t+10s)
+        // plus the default 800ms margin
+        assertEquals(
+            listOf(
+                GetStatusesCall("42", 40, null, true, 0, "99"),
+                GetStatusesCall("42", 40, null, true, 10_800, "99"),
+            ),
+            accounts.calls,
+        )
+        assertEquals(listOf("100"), result.map { it.status.id })
+    }
+
+    @Test
+    fun `incremental scan propagates a non-transient error immediately`() = runTest {
+        val accounts = FakeAccountsClient((100 downTo 1).map { status(it) }, this)
+        accounts.failure = { MastoApiException(401, "The access token is invalid") }
+
+        val e = assertFailsWith<MastoApiException> {
+            performIncrementalScan(accounts, account, cursor = "10")
+        }
+
+        assertEquals(401, e.httpCode)
+        assertEquals(1, accounts.calls.size)
+    }
+
+    @Test
+    fun `a blank incremental cursor fails fast before any call`() = runTest {
+        val accounts = FakeAccountsClient((10 downTo 1).map { status(it) }, this)
+
+        val e = assertFailsWith<IllegalArgumentException> {
+            performIncrementalScan(accounts, account, cursor = " ")
+        }
+
+        assertTrue(e.message!!.contains("cursor"))
+        assertEquals(0, accounts.calls.size)
+    }
+
+    @Test
+    fun `a non-positive incremental page limit fails fast before any call`() = runTest {
+        val accounts = FakeAccountsClient((10 downTo 1).map { status(it) }, this)
+
+        for (limit in listOf(0, -1)) {
+            val e = assertFailsWith<IllegalArgumentException> {
+                performIncrementalScan(accounts, account, cursor = "1", limit = limit)
+            }
+
+            assertTrue(e.message!!.contains("limit"))
+        }
+        assertEquals(0, accounts.calls.size)
     }
 }

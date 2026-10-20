@@ -12,15 +12,15 @@ import kotlin.time.Duration.Companion.seconds
  * delay** between attempts: no exponential backoff, no jitter, and no `Retry-After`
  * honor — the project decision is to keep the policy trivial and let long-horizon
  * retries happen naturally, because a failed translation is simply attempted again
- * by the next polling cycle. The fixed spacing matches the boot-up scan's transient
- * retry style (see `performInitialScan` in `Scan.kt`).
+ * by the next drain cycle. The fixed spacing matches the scans' transient
+ * retry style (see `performInitialScan`/`performIncrementalScan` in `Scan.kt`).
  *
  * Retryable failures are transport errors ([IOException], which includes connect
  * and read timeouts) and provider-side transient API responses: 408 and 429, plus
  * every 5xx (overloaded or otherwise failing providers). 402 (quota / subscription
  * problems) and 403 (permission or region block) are not retried: both are
  * permanent until a human acts, so retrying cannot succeed and would only burn
- * the attempt budget — the failure propagates, and the next polling cycle
+ * the attempt budget — the failure propagates, and the next drain cycle
  * retries naturally. Everything else propagates immediately: other 4xx (invalid
  * key, bad request, unsupported model), malformed success bodies
  * ([kotlinx.serialization.SerializationException]), and cancellation — retrying
@@ -83,8 +83,8 @@ class RetryingChatClient(
         const val DEFAULT_MAX_ATTEMPTS = 4
 
         /**
-         * Fixed spacing between attempts; same order of magnitude as the boot-up
-         * scan's transient retry delay. Programmatic default for the constructor
+         * Fixed spacing between attempts; same order of magnitude as the scans'
+         * transient retry delay. Programmatic default for the constructor
          * parameter, same container override as [DEFAULT_MAX_ATTEMPTS].
          * */
         val DEFAULT_RETRY_DELAY: Duration = 10.seconds

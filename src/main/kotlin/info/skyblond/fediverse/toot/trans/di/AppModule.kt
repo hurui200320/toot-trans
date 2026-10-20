@@ -96,18 +96,18 @@ fun appModule(
     single<AccountsClient> { OkHttpAccountsClient(get()) }
     single<StatusesClient> { OkHttpStatusesClient(get()) }
 
-    // the pool's worker belongs to this application scope instead of
-    // the main flow's runBlocking scope; the scope is cancelled by its
+    // the application coroutine scope: hosts the main scan loop (see
+    // Main.kt) and the pool's worker; the scope is cancelled by its
     // onClose callback when the container stops. SupervisorJob so a
-    // failed child cannot cancel the scope, and Dispatchers.Default
-    // because the worker only orchestrates — the blocking IO happens
+    // failed child cannot cancel its siblings, and Dispatchers.Default
+    // because the children only orchestrate — the blocking IO happens
     // inside OkHttp.
     single<CoroutineScope> {
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
     } withOptions { onClose { it?.cancel() } }
 
     // the 429 backoff policy shared by the pool's worker and the
-    // boot-up scan; the backoff* settings and their semantics are
+    // scans; the backoff* settings and their semantics are
     // documented on [RateLimitBackoff]
     single<RateLimitBackoff> {
         RateLimitBackoff(
@@ -270,7 +270,7 @@ fun appModule(
             "Config `llmBaseUrl` is not a valid URL, got `$baseUrl`"
         }
         // the transient validation runs through the predicates shared
-        // with the boot-up scan (see `config/Validation.kt`), naming the
+        // with the scans (see `config/Validation.kt`), naming the
         // setting here where the components would only name their
         // parameters
         val maxRetry = requireValidTransientMaxRetry("Config `transientMaxRetry`", config.transientMaxRetry)
@@ -338,6 +338,7 @@ fun appConfigStore(
     val lang = config.targetLanguage
     val langCode = config.targetLangCode
     logger.info { "Configured target language: $lang ($langCode)" }
+    logger.info { "Configured scan interval: ${config.scanInterval}" }
 }
 
 /**

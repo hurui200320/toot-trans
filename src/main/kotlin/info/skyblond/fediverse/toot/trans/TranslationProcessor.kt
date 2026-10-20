@@ -31,9 +31,11 @@ import kotlinx.serialization.SerializationException
  * translated before their replies; a toot still inside [Cooldown]
  * stops the drain and keeps its position, so the rolling cursor never
  * advances past something unprocessed. When a failure stops the drain,
- * the entry stays queued and the whole run is retried by the next
- * process start (the window is rebuilt in memory, there is no state on
- * disk).
+ * the entry stays queued and the next drain cycle retries it; the scan
+ * loop re-fetches from the cursor and refreshes the queued copy first
+ * (the window lives in memory only). The one exception is the loop's
+ * no-cursor bootstrap: when nothing was ever dropped, it sacrifices the
+ * head to establish the cursor, see `PendingQueue.dropHeadAndRecordCursor`.
  *
  * Failure policy (see also [Translator] and [TranslationPoster]):
  * - toot-specific failures — the answer cannot be parsed, the
@@ -49,9 +51,9 @@ import kotlinx.serialization.SerializationException
  *   a revoked token or one without `write:statuses`) propagate: every
  *   following toot would fail the same way;
  * - everything else (rate limits, server errors, transport errors)
- *   stops the drain and leaves the entry queued for the next run. A
- *   posting failure leaves the already-posted prefix in place; the
- *   next run's chain classification reports the partial chain as
+ *   stops the drain and leaves the entry queued for the next drain
+ *   cycle. A posting failure leaves the already-posted prefix in place;
+ *   the next cycle's chain classification reports the partial chain as
  *   invalid and deletes it leaf-first before retranslating.
  * */
 class TranslationProcessor(
@@ -111,7 +113,7 @@ class TranslationProcessor(
 
                     else -> {
                         logger.warn(e) {
-                            "Stopping the drain at toot ${toot.id}; it stays queued for the next run"
+                            "Stopping the drain at toot ${toot.id}; it stays queued for the next drain cycle"
                         }
                         break
                     }
@@ -119,7 +121,7 @@ class TranslationProcessor(
             }
         }
         if (queue.hasNext()) {
-            logger.info { "Drain stopped early, queued entries remain for the next run" }
+            logger.info { "Drain stopped early, queued entries remain for the next drain cycle" }
         } else {
             logger.info { "Queue drain finished" }
         }

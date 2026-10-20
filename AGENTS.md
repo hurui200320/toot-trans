@@ -43,6 +43,8 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
   max-age timing contract.
 - `masto/statuses/Cooldown.kt`: the fetched-at cooldown policy (effective
   time `editedAt ?: createdAt`); single-sources the default cooldown.
+- `Scan.kt`: the bounded newest-window scan and the cursor-based
+  incremental scan, sharing one page-retry policy.
 - `di/AppModule.kt`: the Koin object graph started by `Main.kt`: config
   chain, instance API transport, statuses pool, pending queue, cooldown and
   max-age cutoff, the application coroutine scope, the LLM chat client and
@@ -101,8 +103,11 @@ chat completion API settings.
 The translation stage is the queue drain `TranslationProcessor.kt` runs:
 context (`masto/statuses/ReplyChainContext.kt`) → translate
 (`llm/Translator.kt`) → log for review → post (`llm/TranslationChunks.kt` +
-`masto/statuses/TranslationPoster.kt`). Periodic polling is not implemented
-yet: `Main.kt` scans once, drains, and exits.
+`masto/statuses/TranslationPoster.kt`). `Main.kt` runs the loop: boot scan →
+drain → wait `scanInterval` → incremental scan from the rolling cursor (the
+bounded newest-window scan while no cursor exists yet) → feed → drain again.
+A blocked drain is not terminal; the next scan refreshes the queued copies
+(see `PendingQueue.kt` for the cursor contract).
 
 ## Mastodon rate limits
 
