@@ -83,16 +83,25 @@ data class MediaAttachment(
 )
 
 /**
- * Quoted toot info. One model covers both wire shapes: `ShallowQuote`
- * (with `quoted_status_id`) and the full `Quote` (with a `quoted_status`
- * object, only returned when deleting a toot — not parsed).
+ * The quote attached to a toot: the [state] gate and the quoted toot
+ * embedded as [quotedStatus]. `Status.quote` is always the `Quote`
+ * entity, which embeds the quoted status when it is displayable; the
+ * `ShallowQuote` entity (a bare `quoted_status_id`) only appears as the
+ * embedded toot's own quote, which this project never follows, so its
+ * id field is not parsed.
  * https://docs.joinmastodon.org/entities/Quote
+ * https://docs.joinmastodon.org/entities/ShallowQuote
  * */
 @Serializable
 data class Quote(
     val state: String,
-    @SerialName("quoted_status_id") val quotedStatusId: String? = null,
-)
+    @SerialName("quoted_status") val quotedStatus: Status? = null,
+) {
+    companion object {
+        /** The only displayable [state], per the entity docs. */
+        const val STATE_ACCEPTED = "accepted"
+    }
+}
 
 /**
  * Link preview card attached to a toot.

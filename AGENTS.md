@@ -57,8 +57,8 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
   original's reply chain: per-segment idempotency, the
   visibility/CW/sensitive rules and the 429/transient retry policy.
 - `masto/statuses/ReplyChainContext.kt`: the LLM context builder: ancestor
-  walk via the pool, source fetches, translated-ancestor resolution and the
-  bounded target media downloads.
+  walk via the pool, source fetches, translated-ancestor resolution, the
+  target's quoted-toot context and the bounded target media downloads.
 - `TranslationProcessor.kt`: the queue drain and its failure policy: the
   orchestrator `Main.kt` runs after each scan.
 - `masto/client/`: instance API wire layer over `MastoApiClient.kt`, split
@@ -77,14 +77,15 @@ Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid u
   paragraph → sentence → hard-cut segmentation that packs one translation
   into footer-carrying segments.
 - `llm/TranslationRequestFactory.kt`: the prompt contract (JSON answer shape,
-  history pairing, context blocks), the always-sent strict `response_format`
-  schema and the three request variants.
+  history pairing, context blocks: quoted toot, link preview, media), the
+  always-sent strict `response_format` schema and the three request variants.
 - `llm/Translator.kt`: the request fallback sequence over `ChatClient` —
   payload-shaped downgrades and answer retries (a content-filtered answer
   skips the retries) — plus the answer's source-shape policy.
 - `llm/TranslationOutput.kt`: parsing of the JSON answer contract.
-- `llm/TranslationContext.kt`: the prompt input types and the
-  `<missing translation>` / `<empty content>` placeholders.
+- `llm/TranslationContext.kt`: the prompt input types (including the
+  quoted-toot context) and the `<missing translation>` / `<empty content>`
+  placeholders.
 
 ## Architecture
 

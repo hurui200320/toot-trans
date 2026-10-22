@@ -52,9 +52,12 @@ The drain, per eligible toot:
    text via `/statuses/:id/source`, each translated ancestor as a user/assistant
    turn (`<missing translation>` for an ancestor without a complete chain,
    `<empty content>` for a toot with neither body nor warning), and the toot's
-   own images (bounded, failures skipped) for the vision input. A toot turn is a
-   JSON object with a `content` and a `spoiler_text` field, either null when the
-   toot does not have that part.
+   own images (bounded, failures skipped) for the vision input. A toot that
+   quotes another one (an accepted quote) also contributes that toot's rendered
+   HTML content and warning, embedded in the quote entity itself, as a
+   reference-only `context` block next to the link preview card and media
+   descriptions. A toot turn is a JSON object with a `content` and a
+   `spoiler_text` field, either null when the toot does not have that part.
 3. Translate (`llm/Translator.kt`): the request fallback sequence is full
    (history + context + images) → text-only → minimal; a payload-shaped 4xx
    downgrades to the next variant, while an unusable answer (unparsable,

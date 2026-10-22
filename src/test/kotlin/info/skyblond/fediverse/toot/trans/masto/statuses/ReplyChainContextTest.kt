@@ -3,6 +3,7 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 import info.skyblond.fediverse.toot.trans.masto.client.media.LoadedMedia
 import info.skyblond.fediverse.toot.trans.masto.client.media.MediaLoader
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.MediaAttachment
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Quote
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusSource
 import kotlinx.coroutines.test.TestScope
@@ -16,8 +17,8 @@ import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * [ReplyChainContext]: the ancestor walk, the source and translation
- * resolution, and the media rules (target only, capped, degrade on
- * failures).
+ * resolution, the quoted-toot context and the media rules (target
+ * only, capped, degrade on failures).
  * */
 class ReplyChainContextTest {
     private class MediaFake : MediaLoader {
@@ -47,6 +48,11 @@ class ReplyChainContextTest {
 
     private fun image(id: String, url: String = "https://media.example/$id.png"): MediaAttachment =
         MediaAttachment(id = id, type = "image", url = url)
+
+    // the wire shape of Status.quote: the state gate plus the embedded
+    // quoted toot, see Models.kt
+    private fun quote(quoted: Status, state: String = "accepted"): Quote =
+        Quote(state = state, quotedStatus = quoted)
 
     @Test
     fun `depth zero translates the toot without history`() {
@@ -199,6 +205,131 @@ class ReplyChainContextTest {
             val context = f.context.build(p)
             assertTrue(context.images.isEmpty())
             assertTrue(f.media.loaded.isEmpty())
+        }
+    }
+
+    @Test
+    fun `an accepted quote contributes the quoted toot's raw html and warning`() {
+        runTest {
+            val quoted = original("Q").copy(
+                content = "<p>quoted &amp; <b>bold</b><br>second line</p>",
+                spoilerText = "quoted CW",
+            )
+            val root = original("root")
+            val p = original("P", "root").copy(quote = quote(quoted))
+            // Q is fetchable, so any lookup for it would show in lookups
+            val f = Fixture(this, listOf(root, p, quoted))
+            f.feed()
+
+            val context = f.context.build(p)
+            assertEquals(
+                "<p>quoted &amp; <b>bold</b><br>second line</p>",
+                context.target.quotedToot?.content,
+            )
+            assertEquals("quoted CW", context.target.quotedToot?.spoilerText)
+            assertNull(
+                context.entries.first { it.status.id == "root" }.quotedToot,
+                "the quote context belongs to the target only",
+            )
+            assertTrue(
+                f.clientFake.lookups.none { "Q" in it },
+                "the embedded quote costs no lookup, even when Q is fetchable",
+            )
+        }
+    }
+
+    @Test
+    fun `a quoted toot already in the history adds no quote context`() {
+        runTest {
+            val root = original("root")
+            val p = original("P", "root").copy(quote = quote(root))
+            val f = Fixture(this, listOf(root, p))
+            f.feed()
+
+            assertNull(f.context.build(p).target.quotedToot)
+        }
+    }
+
+    @Test
+    fun `an accepted quote without an embedded toot adds no quote context`() {
+        runTest {
+            val p = original("P").copy(quote = Quote(state = "accepted"))
+            val f = Fixture(this, listOf(p))
+            f.feed()
+
+            assertNull(f.context.build(p).target.quotedToot)
+            assertTrue(f.clientFake.lookups.isEmpty(), "an absent embedded toot costs no lookup")
+        }
+    }
+
+    @Test
+    fun `only an accepted quote contributes context`() {
+        runTest {
+            // blocked_account and friends embed the quoted toot on the
+            // wire, so the state gate alone keeps them out
+            for (state in listOf(
+                "pending", "rejected", "revoked", "deleted", "unauthorized",
+                "blocked_account", "blocked_domain", "muted_account",
+            )) {
+                val p = original("P").copy(quote = quote(original("Q"), state))
+                val f = Fixture(this, listOf(p))
+                f.feed()
+
+                assertNull(f.context.build(p).target.quotedToot, state)
+                assertTrue(f.clientFake.lookups.isEmpty(), "state $state must contribute nothing")
+            }
+        }
+    }
+
+    @Test
+    fun `a quoted toot with neither content nor warning adds no quote context`() {
+        runTest {
+            val p = original("P").copy(quote = quote(original("Q").copy(content = "")))
+            val f = Fixture(this, listOf(p))
+            f.feed()
+
+            assertNull(f.context.build(p).target.quotedToot)
+        }
+    }
+
+    @Test
+    fun `a warning-only quoted toot contributes a null content and its warning`() {
+        runTest {
+            val p = original("P").copy(
+                quote = quote(original("Q").copy(content = "", spoilerText = "quoted CW"))
+            )
+            val f = Fixture(this, listOf(p))
+            f.feed()
+
+            val quotedToot = f.context.build(p).target.quotedToot
+            assertNull(quotedToot?.content)
+            assertEquals("quoted CW", quotedToot?.spoilerText)
+        }
+    }
+
+    @Test
+    fun `an ancestor's quote is never resolved`() {
+        runTest {
+            val root = original("root").copy(quote = quote(original("Q")))
+            val p = original("P", "root")
+            val f = Fixture(this, listOf(root, p))
+            f.feed()
+
+            val context = f.context.build(p)
+            assertNull(context.entries.first { it.status.id == "root" }.quotedToot)
+        }
+    }
+
+    @Test
+    fun `only the target's direct quote is resolved, not the quote chain`() {
+        runTest {
+            val quoted = original("Q").copy(quote = quote(original("R")))
+            val p = original("P").copy(quote = quote(quoted))
+            val f = Fixture(this, listOf(p))
+            f.feed()
+
+            val context = f.context.build(p)
+            assertEquals("<p>中文 body Q</p>", context.target.quotedToot?.content)
         }
     }
 }

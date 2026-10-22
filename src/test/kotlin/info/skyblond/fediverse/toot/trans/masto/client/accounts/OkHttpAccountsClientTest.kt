@@ -146,7 +146,18 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
                 "poll": null,
                 "quote": {
                   "state": "accepted",
-                  "quoted_status_id": "103270115826048975"
+                  "quoted_status": {
+                    "id": "103270115826048975",
+                    "created_at": "2025-01-01T00:00:00.000Z",
+                    "in_reply_to_id": null,
+                    "in_reply_to_account_id": null,
+                    "sensitive": false,
+                    "spoiler_text": "",
+                    "visibility": "public",
+                    "language": "en",
+                    "content": "<p>quoted</p>",
+                    "media_attachments": []
+                  }
                 },
                 "some_future_field": { "nested": [1, 2, 3] }
               },
@@ -170,19 +181,7 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
                 "emojis": [],
                 "card": null,
                 "quote": {
-                  "state": "pending",
-                  "quoted_status": {
-                    "id": "999",
-                    "created_at": "2025-01-01T00:00:00.000Z",
-                    "in_reply_to_id": null,
-                    "in_reply_to_account_id": null,
-                    "sensitive": false,
-                    "spoiler_text": "",
-                    "visibility": "public",
-                    "language": "en",
-                    "content": "<p>quoted</p>",
-                    "media_attachments": []
-                  }
+                  "state": "pending"
                 },
                 "poll": {
                   "id": "34830",
@@ -221,7 +220,9 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
         assertEquals("image", first.mediaAttachments[0].type)
         assertEquals("test media description", first.mediaAttachments[0].description)
         assertEquals("accepted", first.quote?.state)
-        assertEquals("103270115826048975", first.quote?.quotedStatusId)
+        // the Quote entity embeds the quoted toot, see Models.kt
+        assertEquals("103270115826048975", first.quote?.quotedStatus?.id)
+        assertEquals("<p>quoted</p>", first.quote?.quotedStatus?.content)
         assertEquals("link", first.card?.type)
         assertNull(first.poll)
 
@@ -234,10 +235,9 @@ class OkHttpAccountsClientTest : MastoApiTestBase() {
         assertEquals("unlisted", second.visibility)
         assertEquals(true, second.sensitive)
         assertEquals(0, second.mediaAttachments.size)
-        // full Quote wire shape: only the state is parsed,
-        // the quoted_status object is skipped
+        // a pending quote carries no embedded quoted toot on the wire
         assertEquals("pending", second.quote?.state)
-        assertNull(second.quote?.quotedStatusId)
+        assertNull(second.quote?.quotedStatus)
         assertNull(second.card)
         val poll = second.poll!!
         assertEquals(2, poll.options.size)

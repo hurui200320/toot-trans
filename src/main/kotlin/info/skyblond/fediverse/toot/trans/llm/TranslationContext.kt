@@ -41,7 +41,7 @@ data class TranslationContext(
 data class TranslationContextEntry(
     /**
      * The fetched status, for the metadata only the entity carries
-     * (link preview card, media attachments).
+     * (link preview card, media attachments, quote reference).
      * */
     val status: Status,
 
@@ -64,6 +64,14 @@ data class TranslationContextEntry(
      * first segment's spoiler text), when it had one.
      * */
     val translationSpoilerText: String? = null,
+
+    /**
+     * The toot quoted by this entry, reference-only like the link
+     * preview card and media descriptions; null when the entry quotes
+     * nothing displayable. Populated for the translation target only,
+     * see `ReplyChainContext`.
+     * */
+    val quotedToot: QuotedToot? = null,
 ) {
     init {
         require(translationSpoilerText == null || translation != null) {
@@ -71,6 +79,24 @@ data class TranslationContextEntry(
         }
     }
 }
+
+/**
+ * The toot quoted by the toot under translation, as reference-only
+ * context: the quoted toot's rendered HTML [content] and its content
+ * warning, straight from the quote embedded in the fetched status.
+ * [content] is null for a warning-only quoted toot, mirroring the null
+ * `"content"` rule of the prompt's toot shape.
+ *
+ * A quoted toot is usually not owned by the token account, so its
+ * composing text is unavailable (`GET /statuses/:id/source` only
+ * serves own statuses) and the rendered [Status.content] HTML is passed
+ * through as-is: the value is never translated or echoed, so it needs
+ * no composing fidelity, and the model reads markup fine.
+ * */
+data class QuotedToot(
+    val content: String?,
+    val spoilerText: String? = null,
+)
 
 /**
  * Assistant-turn placeholder of an ancestor whose translation is not

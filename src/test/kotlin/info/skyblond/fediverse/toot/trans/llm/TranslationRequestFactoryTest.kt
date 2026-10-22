@@ -45,12 +45,14 @@ class TranslationRequestFactoryTest {
         spoilerText: String = "",
         translation: String? = null,
         translationSpoilerText: String? = null,
+        quotedToot: QuotedToot? = null,
         configure: (Status) -> Status = { it },
     ) = TranslationContextEntry(
         status = configure(original(id).copy(spoilerText = spoilerText.takeIf { it.isNotBlank() })),
         source = StatusSource(id, text, spoilerText),
         translation = translation,
         translationSpoilerText = translationSpoilerText,
+        quotedToot = quotedToot,
     )
 
     private fun userJson(message: ChatMessage): JsonObject =
@@ -188,6 +190,7 @@ class TranslationRequestFactoryTest {
                 entry("root", "root text", translation = "root translation"),
                 entry(
                     "P", "target text",
+                    quotedToot = QuotedToot("<p>quoted</p>"),
                     configure = {
                         it.copy(
                             card = PreviewCard("https://example.com/a", "link", title = "标题", description = "描述"),
@@ -200,13 +203,77 @@ class TranslationRequestFactoryTest {
 
         val text = factory.createTextRequest(context)
         val contextField = userJson(text.messages.last())["context"]?.jsonPrimitive?.content
-        assertTrue(contextField!!.contains("[Link preview] 标题 - 描述"), contextField)
+        assertTrue(contextField!!.contains("[Quoted toot] "), contextField)
+        assertTrue(contextField.contains("[Link preview] 标题 - 描述"), contextField)
         assertTrue(contextField.contains("[Media description] alt text"), contextField)
 
         val minimal = factory.createMinimalRequest(context)
         assertEquals(2, minimal.messages.size)
         assertEquals(ChatRole.SYSTEM, minimal.messages[0].role)
         assertNull(userJson(minimal.messages[1])["context"])
+    }
+
+    @Test
+    fun `the quoted toot leads the context blocks as a raw html toot json`() {
+        val context = TranslationContext(
+            listOf(
+                entry(
+                    "P", "target text",
+                    quotedToot = QuotedToot("<p>quoted &amp; <b>bold</b></p>", "quoted CW"),
+                    configure = {
+                        it.copy(
+                            card = PreviewCard("https://example.com/a", "link", title = "标题", description = "描述"),
+                            mediaAttachments = listOf(MediaAttachment("m1", "image", description = "alt text")),
+                        )
+                    },
+                )
+            )
+        )
+
+        val contextField = userJson(factory.createTextRequest(context).messages.last())["context"]!!
+            .jsonPrimitive.content
+        assertTrue(contextField.startsWith("[Quoted toot] "), contextField)
+        assertTrue(
+            contextField.indexOf("[Quoted toot]") < contextField.indexOf("[Link preview]"),
+            "the quote must lead the reference blocks: $contextField",
+        )
+        // the quoted toot keeps the prompt's two-field shape, with the
+        // fetched HTML as-is and escaped newlines keeping it one line
+        val quoted = Json.parseToJsonElement(
+            contextField.substringAfter("[Quoted toot] ").lineSequence().first()
+        ).jsonObject
+        assertEquals("<p>quoted &amp; <b>bold</b></p>", quoted["content"]?.jsonPrimitive?.content)
+        assertEquals("quoted CW", quoted["spoiler_text"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `a quoted toot without a warning echoes a null spoiler`() {
+        val context = TranslationContext(
+            listOf(entry("P", "target text", quotedToot = QuotedToot("<p>quoted</p>")))
+        )
+        val contextField = userJson(factory.createTextRequest(context).messages.last())["context"]!!
+            .jsonPrimitive.content
+        val quoted = Json.parseToJsonElement(
+            contextField.substringAfter("[Quoted toot] ").lineSequence().first()
+        ).jsonObject
+        assertEquals("<p>quoted</p>", quoted["content"]?.jsonPrimitive?.content)
+        assertEquals(JsonNull, quoted["spoiler_text"])
+    }
+
+    @Test
+    fun `a warning-only quoted toot echoes a null content`() {
+        val context = TranslationContext(
+            listOf(
+                entry("P", "target text", quotedToot = QuotedToot(content = null, spoilerText = "quoted CW"))
+            )
+        )
+        val contextField = userJson(factory.createTextRequest(context).messages.last())["context"]!!
+            .jsonPrimitive.content
+        val quoted = Json.parseToJsonElement(
+            contextField.substringAfter("[Quoted toot] ").lineSequence().first()
+        ).jsonObject
+        assertEquals(JsonNull, quoted["content"])
+        assertEquals("quoted CW", quoted["spoiler_text"]?.jsonPrimitive?.content)
     }
 
     @Test

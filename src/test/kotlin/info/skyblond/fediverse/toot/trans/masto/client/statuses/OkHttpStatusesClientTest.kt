@@ -105,6 +105,57 @@ class OkHttpStatusesClientTest : MastoApiTestBase() {
     }
 
     @Test
+    fun `getStatus parses the quote entity's embedded quoted status`() {
+        // trimmed from a Mastodon 4.7 response: Status.quote always
+        // embeds the quoted toot as `quoted_status`; a bare
+        // `quoted_status_id` never appears here (that is the
+        // ShallowQuote shape used elsewhere, see Models.kt)
+        enqueueJson(
+            200,
+            """
+            {
+              "id": "117480475298330702",
+              "created_at": "2026-10-21T19:09:51.542Z",
+              "in_reply_to_id": null,
+              "in_reply_to_account_id": null,
+              "sensitive": false,
+              "spoiler_text": "",
+              "visibility": "public",
+              "language": "zh-CN",
+              "content": "<p>修好了，网站重新上线了</p>",
+              "media_attachments": [],
+              "quote": {
+                "state": "accepted",
+                "quoted_status": {
+                  "id": "117479350881447338",
+                  "created_at": "2026-10-21T14:23:54.301Z",
+                  "in_reply_to_id": null,
+                  "in_reply_to_account_id": null,
+                  "sensitive": false,
+                  "spoiler_text": "运维",
+                  "visibility": "public",
+                  "language": "zh-CN",
+                  "content": "<p>好，暂时先把服务器的php容器停掉了（</p>",
+                  "media_attachments": [],
+                  "quote": { "state": "accepted", "quoted_status_id": "123" }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+
+        val quote = runBlocking { client.getStatus("117480475298330702") }.status.quote
+
+        assertEquals("accepted", quote?.state)
+        assertEquals("117479350881447338", quote?.quotedStatus?.id)
+        assertEquals("<p>好，暂时先把服务器的php容器停掉了（</p>", quote?.quotedStatus?.content)
+        assertEquals("运维", quote?.quotedStatus?.spoilerText)
+        // the embedded toot's own quote is the ShallowQuote shape, whose
+        // id is not parsed: the quote chain is never followed
+        assertNull(quote?.quotedStatus?.quote?.quotedStatus)
+    }
+
+    @Test
     fun `getStatus stamps the fetch time before the request goes out`() {
         // the cooldown proof rests on the stamp preceding the request:
         // the instance generates its response at or after the stamp

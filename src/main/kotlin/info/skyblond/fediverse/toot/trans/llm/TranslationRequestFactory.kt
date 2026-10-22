@@ -7,8 +7,10 @@ import info.skyblond.fediverse.toot.trans.llm.client.ContentPart
 import info.skyblond.fediverse.toot.trans.llm.client.JsonSchemaSpec
 import info.skyblond.fediverse.toot.trans.llm.client.ReasoningEffort
 import info.skyblond.fediverse.toot.trans.llm.client.ResponseFormat
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -22,7 +24,8 @@ import kotlinx.serialization.json.putJsonObject
  * The three builders are the fallback sequence `Translator` walks, from
  * the richest payload to the barest, so a provider that rejects one
  * shape can still answer the next:
- * - [createFullRequest]: history + link-preview/media context + images;
+ * - [createFullRequest]: history + reference context (quoted toot,
+ *   link preview, media) + images;
  * - [createTextRequest]: everything except the images;
  * - [createMinimalRequest]: the toot alone, no history, no context.
  *
@@ -47,6 +50,11 @@ import kotlinx.serialization.json.putJsonObject
  * ancestor without a complete chain contributes
  * [MISSING_TRANSLATION_PLACEHOLDER] as the assistant turn. The toot
  * under translation is always the last user turn.
+ *
+ * The target user turn also carries an optional `"context"` field:
+ * reference-only, untranslated blocks holding the toot it quotes (raw
+ * HTML plus content warning), its link preview card and its media
+ * descriptions.
  *
  * The `llm*` request parameters ([model], [reasoningEffort],
  * [maxCompletionTokens], [extraParameter]) are attached to every
@@ -125,7 +133,7 @@ class TranslationRequestFactory(
         |- Answer "content": null when the last toot's "content" is null or exactly `$EMPTY_CONTENT_PLACEHOLDER`;
         |  answer "spoiler_text": null when the last toot's "spoiler_text" is null.
         |- The optional "context" field and images of a user message are reference material: never translate them or include them in the answer.
-        |  Use them to help shape the translation.
+        |  Use them to help shape the translation. A quoted toot in "context" is raw HTML: read it as text, never copy its markup.
         |- Preserve @mentions, #hashtags, :emoji_shortcodes: and URLs exactly as they appear.
         |- Keep the original line breaks and paragraph structure in "content".
         |- Translate the content warning in "spoiler_text" as faithfully as the body.
@@ -134,27 +142,29 @@ class TranslationRequestFactory(
     """.trimMargin()
 
     /**
-     * One toot's original as a user turn: a JSON object with the
-     * toot's `"content"` and `"spoiler_text"`, null for a part the
-     * toot does not have. `"content"` holds the body alone — a toot
-     * with a content warning but no body has a null content, so its
-     * warning is the only thing to translate — and a toot with
-     * neither carries [EMPTY_CONTENT_PLACEHOLDER] instead, so it is
-     * never mistaken for a message whose content got lost.
-     * [contextBlock] attaches the reference-only blocks of the toot
-     * under translation.
+     * One toot's original as a user turn: the prompt's two-field toot
+     * shape ([putToot]) with the toot's `"content"` and
+     * `"spoiler_text"`, null for a part the toot does not have.
+     * `"content"` holds the body alone — a toot with a content warning
+     * but no body has a null content, so its warning is the only thing
+     * to translate — and a toot with neither carries
+     * [EMPTY_CONTENT_PLACEHOLDER] instead, so it is never mistaken for
+     * a message whose content got lost. [contextBlock] attaches the
+     * reference-only blocks of the toot under translation.
      * */
     private fun originalJson(entry: TranslationContextEntry, contextBlock: String? = null): String {
         val spoilerText = entry.source.spoilerText
         return buildJsonObject {
-            when {
-                entry.source.text.isNotBlank() -> put("content", entry.source.text)
-                // a warning-only toot has no body to translate
-                spoilerText.isNotBlank() -> put("content", JsonNull)
-                // neither body nor warning
-                else -> put("content", EMPTY_CONTENT_PLACEHOLDER)
-            }
-            put("spoiler_text", spoilerText.takeIf(String::isNotBlank)?.let(::JsonPrimitive) ?: JsonNull)
+            putToot(
+                content = when {
+                    entry.source.text.isNotBlank() -> JsonPrimitive(entry.source.text)
+                    // a warning-only toot has no body to translate
+                    spoilerText.isNotBlank() -> JsonNull
+                    // neither body nor warning
+                    else -> JsonPrimitive(EMPTY_CONTENT_PLACEHOLDER)
+                },
+                spoilerText = spoilerText,
+            )
             if (!contextBlock.isNullOrBlank()) put("context", contextBlock)
         }.toString()
     }
@@ -162,22 +172,37 @@ class TranslationRequestFactory(
     /**
      * One ancestor's existing translation as an assistant turn,
      * echoing the output contract: the same `"content"` /
-     * `"spoiler_text"` shape, with a null content for a body-less
-     * translation ([entry.translation] is blank then). The placeholder
-     * replaces the whole turn when the ancestor has no complete chain.
+     * `"spoiler_text"` shape ([putToot]), with a null content for a
+     * body-less translation ([entry.translation] is blank then). The
+     * placeholder replaces the whole turn when the ancestor has no
+     * complete chain.
      * */
     private fun translationJson(entry: TranslationContextEntry): String {
         val translation = entry.translation ?: return MISSING_TRANSLATION_PLACEHOLDER
         return buildJsonObject {
-            put("content", translation.takeIf(String::isNotBlank)?.let(::JsonPrimitive) ?: JsonNull)
-            put("spoiler_text", entry.translationSpoilerText?.takeIf(String::isNotBlank)?.let(::JsonPrimitive) ?: JsonNull)
+            putToot(
+                content = translation.takeIf(String::isNotBlank)?.let(::JsonPrimitive) ?: JsonNull,
+                spoilerText = entry.translationSpoilerText,
+            )
         }.toString()
     }
 
     /**
+     * The prompt's two-field toot shape: [content] laid out by the
+     * caller's own placeholder rules, plus the content warning as a
+     * nullable string. Every toot in a request — original, translation
+     * or quoted — is rendered through this shape, see the class KDoc.
+     * */
+    private fun JsonObjectBuilder.putToot(content: JsonElement, spoilerText: String?) {
+        put("content", content)
+        put("spoiler_text", spoilerText?.takeIf(String::isNotBlank)?.let(::JsonPrimitive) ?: JsonNull)
+    }
+
+    /**
      * The toot under translation as the final user turn: its JSON body
-     * plus the link-preview/media reference blocks (when enabled) and,
-     * for the full variant, the downloaded images as content parts.
+     * plus the reference blocks (quoted toot, link preview, media;
+     * when enabled) and, for the full variant, the downloaded images as
+     * content parts.
      * */
     private fun targetMessage(
         context: TranslationContext,
@@ -197,12 +222,20 @@ class TranslationRequestFactory(
     }
 
     /**
-     * Reference-only blocks of one entry: the link preview card and the
-     * media descriptions. Both are optional; null when there is
+     * Reference-only blocks of one entry, in prompt order: the toot it
+     * quotes ([QuotedToot.content] is raw HTML), the link preview card
+     * and the media descriptions. All are optional; null when there is
      * nothing to add.
      * */
     private fun contextBlocks(entry: TranslationContextEntry): String? {
         val blocks = buildList {
+            entry.quotedToot?.let { quoted ->
+                add(
+                    "[Quoted toot] " + buildJsonObject {
+                        putToot(quoted.content?.let(::JsonPrimitive) ?: JsonNull, quoted.spoilerText)
+                    }.toString()
+                )
+            }
             entry.status.card?.let { card ->
                 val description = listOfNotNull(card.title, card.description)
                     .map(String::trim)

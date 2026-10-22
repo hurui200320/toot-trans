@@ -2,10 +2,12 @@ package info.skyblond.fediverse.toot.trans.masto.statuses
 
 import info.skyblond.fediverse.toot.trans.config.requireValidReplyChainDepth
 import info.skyblond.fediverse.toot.trans.llm.Footer.Companion.removeFooterFromText
+import info.skyblond.fediverse.toot.trans.llm.QuotedToot
 import info.skyblond.fediverse.toot.trans.llm.TranslationContext
 import info.skyblond.fediverse.toot.trans.llm.TranslationContextEntry
 import info.skyblond.fediverse.toot.trans.llm.client.ContentPart
 import info.skyblond.fediverse.toot.trans.masto.client.media.MediaLoader
+import info.skyblond.fediverse.toot.trans.masto.client.statuses.Quote
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.Status
 import info.skyblond.fediverse.toot.trans.masto.client.statuses.StatusesClient
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -40,6 +42,12 @@ import kotlinx.coroutines.CancellationException
  * Images are loaded for the toot under translation only, through
  * [mediaLoader], capped by [MediaLoader.MAX_IMAGES_PER_REQUEST]; one
  * failed download skips that image (logged), never the translation.
+ *
+ * A quoted toot ([Status.quote]) contributes the quoted status's
+ * rendered HTML content and content warning as reference-only context
+ * ([QuotedToot]), for the toot under translation only. The quoted toot
+ * arrives embedded in the quote entity, so the step costs no API call;
+ * an absent or undisplayable quote contributes nothing.
  * */
 class ReplyChainContext(
     private val queue: PendingQueue,
@@ -54,8 +62,10 @@ class ReplyChainContext(
 
     /**
      * Assemble the context for [toot]: ancestors oldest first, the toot
-     * itself last, plus its images. Transport and API failures from the
-     * source reads propagate; only media downloads degrade.
+     * itself last, plus its images and, when it quotes a displayable
+     * toot, that toot as reference-only context. Transport and API
+     * failures from the source reads propagate; only media downloads
+     * degrade.
      * */
     suspend fun build(toot: Status): TranslationContext {
         val chain = buildChain(toot)
@@ -72,7 +82,14 @@ class ReplyChainContext(
                 translationSpoilerText = ancestorTranslation?.spoilerText,
             )
         }
-        return TranslationContext(entries, loadImages(toot))
+        val target = entries.last()
+        val quotedToot = resolveQuotedToot(target.status, chain.map { it.id }.toSet())
+        val withQuote = if (quotedToot == null) {
+            entries
+        } else {
+            entries.dropLast(1) + target.copy(quotedToot = quotedToot)
+        }
+        return TranslationContext(withQuote, loadImages(toot))
     }
 
     /**
@@ -114,6 +131,25 @@ class ReplyChainContext(
             text = sources.joinToString("\n") { it.text.removeFooterFromText() },
             spoilerText = sources.first().spoilerText.takeIf { it.isNotBlank() },
         )
+    }
+
+    /**
+     * The toot quoted by [target] as reference-only context, or null
+     * when there is none to attach: the quote is not accepted (only
+     * that state is displayable, see the Quote entity's `state`), the
+     * quoted toot already appears in the history ([chainIds]), or the
+     * embedded quoted toot is absent or carries neither content nor a
+     * warning.
+     * */
+    private fun resolveQuotedToot(target: Status, chainIds: Set<String>): QuotedToot? {
+        val quote = target.quote ?: return null
+        if (quote.state != Quote.STATE_ACCEPTED) return null
+        val quoted = quote.quotedStatus ?: return null
+        if (quoted.id in chainIds) return null
+        val content = quoted.content?.takeIf { it.isNotBlank() }
+        val spoilerText = quoted.spoilerText?.takeIf { it.isNotBlank() }
+        if (content == null && spoilerText == null) return null
+        return QuotedToot(content, spoilerText)
     }
 
     /**
