@@ -29,6 +29,11 @@ It will automatically translate toots posted by the account owner
 into preconfigured language and post the translation as a reply to
 the original toot.
 
+The primary deployment artifact is a GraalVM (Community Edition) native
+image: keep the app and its dependencies buildable by
+`./gradlew nativeCompile` (see the README's "Native image (GraalVM CE)"
+section for the build facts).
+
 ## Repo map
 
 Base package for toot translation: `info.skyblond.fediverse.toot.trans` (avoid using Mastodon in code due to copyright issues).
@@ -101,6 +106,15 @@ The object graph is wired with Koin in the `di` package:
 For LLM translation, this project accepts standard OpenAI compatible
 chat completion API settings.
 
+GraalVM native image is a first-class build target (`graalvmNative` in
+`build.gradle.kts`): the code avoids runtime reflection beyond what the
+dependencies need, every Koin binding in `di/AppModule.kt` is an
+explicit lambda, and Logback's reflection metadata comes from the
+GraalVM Reachability Metadata Repository (do not disable it). When
+adding a dependency or reflection-like code, re-verify the native
+build; the README's "Native image (GraalVM CE)" section owns the
+details.
+
 The translation stage is the queue drain `TranslationProcessor.kt` runs:
 context (`masto/statuses/ReplyChainContext.kt`) → translate
 (`llm/Translator.kt`) → log for review → post (`llm/TranslationChunks.kt` +
@@ -141,7 +155,11 @@ exhausted bucket returns HTTP 429. This project's traffic touches:
 
 ```bash
 ./gradlew test
+./gradlew nativeCompile
 ```
+
+`nativeCompile` needs `GRAALVM_HOME` pointing at a GraalVM for JDK 25
+(see the README's "Native image (GraalVM CE)" section).
 
 Run verification after any relevant source change. All commands must exit clean.
 

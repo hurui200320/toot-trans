@@ -2,6 +2,10 @@
 
 Automatically translate toots.
 
+The primary deployment artifact is a GraalVM native image: one small,
+fast-starting, self-contained binary — see
+[Native image (GraalVM CE)](#native-image-graalvm-ce).
+
 ## Compatibility
 
 This project targets the account owner's locally authored posts on vanilla
@@ -151,6 +155,8 @@ The queue only decides what enters the work window; see
   window head, its drop advances the rolling cursor past it, so it is not
   retried automatically. A provider that rejects everything keeps producing
   loud logs for the toots that follow.
+- Translation context is still rough, good enough for my own use, but improvements
+  are welcome.
 
 ## Access Token
 
@@ -363,6 +369,65 @@ plaintext, it cannot speak TLS to one) and a URL carrying credentials
 variable — a broken proxy setup never silently degrades to a direct
 connection. `NO_PROXY` is not honored: once a proxy is configured, every
 request uses it.
+
+## Native image (GraalVM CE)
+
+The primary deployment artifact is a GraalVM native image: `./gradlew
+nativeCompile` produces a single self-contained binary at
+`build/native/nativeCompile/toot-trans` — no JVM, no `lib/` classpath
+directory, fast startup and a small memory footprint. The binary reads
+the same environment variables and properties file as the JVM run (see
+[Configuration](#configuration)); the only thing baked into the image is
+`logback.xml`.
+
+Prerequisite: a GraalVM for JDK 25 (GraalVM Community Edition is what we
+build and test with). Gradle finds it through `GRAALVM_HOME`:
+
+```bash
+sdk install java 25.4.4.1+1-graalce
+export GRAALVM_HOME="$HOME/.sdkman/candidates/java/25.4.4.1+1-graalce"
+./gradlew nativeCompile
+./build/native/nativeCompile/toot-trans
+```
+
+`nativeRun` also exists, but the application is a long-running daemon, so
+starting the produced binary directly is usually more convenient.
+
+Build facts (the `graalvmNative` block in `build.gradle.kts` carries the
+config with its comments):
+
+- The GraalVM Reachability Metadata Repository must stay enabled: it
+  supplies Logback's reflection metadata. With it disabled the build
+  still succeeds, but at runtime Logback cannot instantiate its XML
+  configurator, silently ignores `logback.xml`, and the application's
+  formatted logs disappear — a native build without the repository is
+  broken, not merely quieter.
+- OkHttp ships its own native-image support; plain and TLS HTTP both work
+  end to end. The TLS trust store is captured at build time and embedded
+  into the binary: rebuild the image when CA roots rotate, or point the
+  binary at a different store with `-Djavax.net.ssl.trustStore=...`.
+- Native builds do not cross-compile: build on the target platform (or in
+  a container of it). The binary is dynamically linked against the build
+  host's libc (glibc on Linux), so the runtime must match — a glibc base
+  like Debian slim or distroless works; no `ca-certificates` package is
+  needed unless overriding the trust store at runtime.
+- Exit handlers are installed by default, so the shutdown hook `Main.kt`
+  registers runs on SIGTERM (Docker stop): Koin tears the pool down
+  exactly as on the JVM.
+- Native tests are disabled (`testSupport` in `build.gradle.kts`):
+  `./gradlew test` on the JVM stays the primary suite, and
+  `./gradlew nativeCompile` is the native-side verification.
+
+The build prints a few deprecation warnings from OkHttp's bundled
+`native-image.properties` (`--enable-http`/`--enable-https`); they are
+harmless on current GraalVM.
+
+Adding a dependency can break the native build (missing reflection or
+resource metadata, unsupported runtime codegen): check the library
+against https://www.graalvm.org/native-image/libraries-and-frameworks/
+and verify with `./gradlew nativeCompile`. Koin is the one runtime
+dependency outside that list; it works today because `di/AppModule.kt`
+defines every binding with an explicit lambda — keep that style.
 
 ## Shared status lookups
 

@@ -2,6 +2,9 @@ plugins {
     kotlin("jvm") version "2.4.20"
     kotlin("plugin.serialization") version "2.4.20"
     id("io.insert-koin.compiler.plugin") version "1.2.1"
+    // GraalVM native image is the primary deployment artifact:
+    // see README "Native image (GraalVM CE)"
+    id("org.graalvm.buildtools.native") version "1.1.17"
     application
 }
 
@@ -61,4 +64,26 @@ application {
 
 koinCompiler {
     aiAssist = false
+}
+
+graalvmNative {
+    binaries {
+        named("main") {
+            // Embed src/main/resources (logback.xml) in the image: without
+            // the embedded file Logback silently falls back to its basic
+            // config at runtime (the XML config is lost, not the binary).
+            // See README "Native image (GraalVM CE)".
+            resources.autodetect()
+        }
+    }
+    // The GraalVM Reachability Metadata Repository must stay enabled: it
+    // supplies Logback's reflection metadata, without which the build
+    // succeeds but the binary cannot run its XML configurator.
+    metadataRepository {
+        enabled.set(true)
+    }
+    // JVM tests stay the primary suite: a native test image would also
+    // need JUnit/MockWebServer metadata. `./gradlew test` covers the code;
+    // `./gradlew nativeCompile` verifies the native build.
+    testSupport.set(false)
 }
