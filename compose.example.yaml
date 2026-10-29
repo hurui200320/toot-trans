@@ -1,0 +1,78 @@
+# Example Docker Compose deployment of the published toot-trans image.
+#
+# Usage:
+#   1. copy this file to `compose.yaml` (or keep both names apart);
+#   2. fill the values the `${...}` placeholders read from a `.env` file
+#      next to the compose file (docker compose reads it automatically).
+#      `.env` is gitignored, so the token and the API key never get
+#      committed by accident:
+#         MASTO_HOST=https://mastodon.social/
+#         ACCESS_TOKEN=<the access token from the README's "Access Token">
+#         LLM_BASE_URL=https://api.openai.com/v1
+#         LLM_API_KEY=<your provider key>
+#   3. `docker compose up -d`, then watch it with `docker compose logs -f`.
+#
+# Every key below is one of the environment variables from the README's
+# "Configuration" table (that table is the reference; it also lists every
+# setting's meaning). Environment variables beat a config.properties file.
+# Required settings use `${VAR:?...}` so compose fails fast naming the
+# variable; the optional block keeps the built-in defaults unless a line
+# is uncommented.
+
+services:
+  toot-trans:
+    # `:1` is the latest release, `:nightly` the latest master build
+    # (see the README's "Published images" table for every tag and the
+    # supported platform).
+    image: ghcr.io/hurui200320/toot-trans:1
+    container_name: toot-trans
+    # Long-running daemon: come back after a crash or a host reboot.
+    # `docker stop` sends SIGTERM, which the app's shutdown hook handles.
+    restart: unless-stopped
+
+    environment:
+      # --- Instance connection (required) ---
+      MASTO_HOST: ${MASTO_HOST:?required, e.g. https://mastodon.social/}
+      ACCESS_TOKEN: ${ACCESS_TOKEN:?required, the account access token}
+
+      # --- Translation target ---
+      TARGET_LANGUAGE: ${TARGET_LANGUAGE:-English}
+      TARGET_LANG_CODE: ${TARGET_LANG_CODE:-en}
+
+      # --- LLM provider (the model must support structured outputs) ---
+      LLM_BASE_URL: ${LLM_BASE_URL:?required, OpenAI-compatible API root, e.g. https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:?required, the provider API key}
+      LLM_MODEL: ${LLM_MODEL:-google/gemini-4-argon}
+      LLM_MAX_COMPLETION_TOKENS: ${LLM_MAX_COMPLETION_TOKENS:-16384}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-high}
+
+      # --- Tuning from the reference config.properties ---
+      POOL_CACHE_TTL: ${POOL_CACHE_TTL:-3m}
+      INITIAL_SCAN_SIZE: ${INITIAL_SCAN_SIZE:-100}
+      TRANSLATION_COOLDOWN: ${TRANSLATION_COOLDOWN:-1m}
+
+      # --- Optional settings left at their built-in defaults;
+      #     uncomment and adjust as needed (values shown are the defaults) ---
+      # POOL_BATCH_WINDOW: 1s
+      # POOL_MAX_CACHE_ENTRIES: 1000
+      # BACKOFF_RESET_MARGIN: 800ms
+      # BACKOFF_FALLBACK_DELAY: 10s
+      # BACKOFF_MAX_WAIT_DURATION: 24h
+      # SCAN_INTERVAL: 1m
+      # TRANSIENT_MAX_RETRY: 10
+      # TRANSIENT_RETRY_DELAY: 10s
+      # TRANSLATION_MAX_AGE: 1d
+      # REPLY_CHAIN_DEPTH: 3
+      # LLM_CONNECT_TIMEOUT: 30s
+      # LLM_READ_TIMEOUT: 10m
+      # LLM_WRITE_TIMEOUT: 2m
+      # LLM_REQ_EXTRA: '{"temperature": 0.2}'
+
+      # --- Proxy (optional): honors the conventional variables; no proxy
+      #     authentication, and NO_PROXY is not honored (README "Proxy") ---
+      # HTTPS_PROXY: http://127.0.0.1:3128
+
+    # Alternative to the environment above: mount a properties file at the
+    # default path instead (env vars still win per setting).
+    # volumes:
+    #   - ./config.properties:/app/config.properties:ro

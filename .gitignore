@@ -44,3 +44,5 @@ bin/
 ### Mac OS ###
 .DS_Store
 config.properties
+# Secrets for compose.example.yaml live here
+.env

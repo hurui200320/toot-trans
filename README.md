@@ -459,6 +459,10 @@ docker run --rm --name toot-trans \
 `config.properties` is listed in `.dockerignore`, so a local file with real
 credentials never enters the build context or an image layer.
 
+For a Docker Compose deployment, start from `compose.example.yaml`: it drives
+every setting from environment variables (a `.env` file, gitignored, holds the
+secrets) and is documented in its header comments.
+
 The `native-image` build wants several GB of free memory, and it compiles for
 the build machine's architecture: build on the target platform, or let buildx
 emulate another one (slow). The runtime base needs a glibc at least as new as
