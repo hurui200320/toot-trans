@@ -466,6 +466,36 @@ the build image's; Debian 13 does (see the build facts in
 [Native image (GraalVM CE)](#native-image-graalvm-ce)). `docker stop` sends
 SIGTERM, which runs the application's shutdown hook.
 
+### Published images
+
+The `Docker image` workflow publishes the image to GitHub Container Registry:
+
+| Image tag | Built from | Meaning |
+| :--- | :--- | :--- |
+| `ghcr.io/hurui200320/toot-trans:nightly` | `master` | latest master build |
+| `ghcr.io/hurui200320/toot-trans:1.2.3` | tag `v1.2.3` | exact release |
+| `ghcr.io/hurui200320/toot-trans:1.2` | tag `v1.2.3` | latest `1.2.x` |
+| `ghcr.io/hurui200320/toot-trans:1` | tag `v1.2.3` | latest `1.x` |
+
+Only stable `vX.Y.Z` tags publish; pre-release and build-metadata tags are
+rejected. The current published image is `linux/amd64` only. Run a published
+image with the same environment or mounted-configuration examples above,
+replacing `toot-trans` with the full image tag:
+
+```bash
+docker pull ghcr.io/hurui200320/toot-trans:1
+docker run --rm --name toot-trans \
+  --env-file toot-trans.env \
+  ghcr.io/hurui200320/toot-trans:1
+```
+
+To publish a release, create and push an annotated SemVer tag:
+
+```bash
+git tag -a v1.2.3 -m "v1.2.3"
+git push origin v1.2.3
+```
+
 ## Shared status lookups
 
 Use `StatusesCachePool` for status-by-ID reads instead of calling the HTTP client
