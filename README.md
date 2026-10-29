@@ -429,6 +429,43 @@ and verify with `./gradlew nativeCompile`. Koin is the one runtime
 dependency outside that list; it works today because `di/AppModule.kt`
 defines every binding with an explicit lambda — keep that style.
 
+## Docker image
+
+`Dockerfile` is a two-stage build: `./gradlew nativeCompile` runs in the
+GraalVM CE `native-image-community` container, and the binary it produces is
+copied into `debian:trixie-slim`. The container runs as a non-root user
+(UID 10001) with `/app` as its working directory.
+
+```bash
+docker build -t toot-trans .
+```
+
+Configuration comes from the environment (see [Configuration](#configuration));
+an env file keeps the token and the API key out of the shell history:
+
+```bash
+docker run --rm --name toot-trans --env-file toot-trans.env toot-trans
+```
+
+A properties file works as well: mount it read-only at the default path
+(`/app/config.properties`, `CONFIG_PROPERTIES_PATH` overrides it).
+
+```bash
+docker run --rm --name toot-trans \
+  -v "$PWD/config.properties:/app/config.properties:ro" \
+  toot-trans
+```
+
+`config.properties` is listed in `.dockerignore`, so a local file with real
+credentials never enters the build context or an image layer.
+
+The `native-image` build wants several GB of free memory, and it compiles for
+the build machine's architecture: build on the target platform, or let buildx
+emulate another one (slow). The runtime base needs a glibc at least as new as
+the build image's; Debian 13 does (see the build facts in
+[Native image (GraalVM CE)](#native-image-graalvm-ce)). `docker stop` sends
+SIGTERM, which runs the application's shutdown hook.
+
 ## Shared status lookups
 
 Use `StatusesCachePool` for status-by-ID reads instead of calling the HTTP client

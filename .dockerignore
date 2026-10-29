@@ -1,0 +1,23 @@
+# Build output and local tool state
+.git
+.gradle
+.kotlin
+build
+out
+
+# IDE state
+.idea
+*.iml
+*.iws
+*.ipr
+.vscode
+
+# Local secrets and machine-specific config: never send these to the daemon
+config.properties
+.env
+*.env
+
+# Not needed by the build
+thoughts.md
+
+.DS_Store
